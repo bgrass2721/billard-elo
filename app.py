@@ -29,9 +29,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 3. GESTION DE LA SESSION (Persistance par Cookies)
-if "user_data" not in st.session_state or st.session_state.user_data is None:
-    # On vérifie si un cookie de connexion existe
+# 3. GESTION DE LA SESSION (Correction de l'AttributeError)
+# SÉCURITÉ : On initialise la clé si elle est absente pour éviter le crash au premier chargement
+if "user_data" not in st.session_state:
+    st.session_state.user_data = None
+
+# Tentative de reconnexion automatique via Cookies ou Session Supabase
+if st.session_state.user_data is None:
+    # 1. On vérifie d'abord les cookies (pour le rafraîchissement de page)
     saved_user_id = cookie_manager.get("bb_user_id")
 
     if saved_user_id:
@@ -46,9 +51,10 @@ if "user_data" not in st.session_state or st.session_state.user_data is None:
             if user_profile.data:
                 st.session_state.user_data = user_profile.data
         except Exception:
-            st.session_state.user_data = None
-    else:
-        # Si pas de cookie, on tente la session Supabase classique
+            pass
+
+    # 2. Si toujours rien, on tente de récupérer la session active Supabase
+    if st.session_state.user_data is None:
         try:
             session = db.supabase.auth.get_session()
             if session and session.user:
@@ -61,7 +67,7 @@ if "user_data" not in st.session_state or st.session_state.user_data is None:
                 )
                 st.session_state.user_data = user_profile.data
         except Exception:
-            st.session_state.user_data = None
+            pass
 
 # --- ÉCRAN DE CONNEXION / INSCRIPTION ---
 if st.session_state.user_data is None:
@@ -77,7 +83,7 @@ if st.session_state.user_data is None:
                     auth_res = db.log_in(email, pwd)
                     user_id = auth_res.user.id
 
-                    # SAUVEGARDE DU COOKIE (30 jours)
+                    # Sauvegarde du cookie pour 30 jours
                     cookie_manager.set("bb_user_id", user_id, key="set_cookie_login")
 
                     user_profile = (
@@ -112,13 +118,13 @@ if st.session_state.user_data is None:
                     try:
                         db.sign_up(new_email, new_pwd, new_pseudo)
                         st.success(
-                            "✅ Compte créé ! Connectez-vous dans l'onglet 'Connexion'."
+                            "✅ Compte créé ! Connectez-vous via l'onglet 'Connexion'."
                         )
                     except Exception as e:
                         st.error(f"Erreur : {e}")
     st.stop()
 
-# --- SI CONNECTÉ : MISE À JOUR DES INFOS EN DIRECT ---
+# --- SI CONNECTÉ : SYNCHRONISATION DES INFOS ---
 current_id = st.session_state.user_data["id"]
 fresh_user = (
     db.supabase.table("profiles").select("*").eq("id", current_id).single().execute()
@@ -148,14 +154,12 @@ if user.get("is_admin"):
 page = st.sidebar.radio("Navigation", menu_options)
 
 if st.sidebar.button("Déconnexion"):
-    # SUPPRESSION DU COOKIE
     cookie_manager.delete("bb_user_id", key="delete_logout")
     db.supabase.auth.sign_out()
     st.session_state.user_data = None
     st.rerun()
 
-# --- LOGIQUE DES PAGES ---
-
+# --- LOGIQUE DES PAGES (Classement, Match, Admin...) ---
 if page == "🏆 Classement":
     st.header("🏆 Tableau des Leaders")
     res = db.get_leaderboard()
