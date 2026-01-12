@@ -3,16 +3,16 @@ from DB_manager import DBManager
 import pandas as pd
 
 # --- CONFIGURATION DU CODE SECRET ---
-# Change ce code par celui de ton choix avant de le mettre sur GitHub
-# On va chercher le code directement dans les secrets sécurisés
+# Récupéré depuis les secrets de Streamlit Cloud pour la sécurité
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
 
 # 1. Configuration de la page
 st.set_page_config(
     page_title="🎱 BlackBall Compétition",
-    page_icon="🎱",  # Ici, l'emoji 🎱 remplacera la couronne orange
+    page_icon="🎱",
     layout="centered",
 )
+
 # 2. Initialisation du manager
 db = DBManager()
 
@@ -28,20 +28,24 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 3. GESTION DE LA SESSION
-if "user_data" not in st.session_state:
-    session = db.supabase.auth.get_session()
-    if session:
-        user_id = session.user.id
-        user_profile = (
-            db.supabase.table("profiles")
-            .select("*")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        st.session_state.user_data = user_profile.data
-    else:
+# 3. GESTION DE LA SESSION (Persistance après refresh)
+if "user_data" not in st.session_state or st.session_state.user_data is None:
+    try:
+        # On tente de récupérer la session active via le stockage local/cookies
+        session = db.supabase.auth.get_session()
+        if session and session.user:
+            user_id = session.user.id
+            user_profile = (
+                db.supabase.table("profiles")
+                .select("*")
+                .eq("id", user_id)
+                .single()
+                .execute()
+            )
+            st.session_state.user_data = user_profile.data
+        else:
+            st.session_state.user_data = None
+    except Exception:
         st.session_state.user_data = None
 
 # --- ÉCRAN DE CONNEXION / INSCRIPTION ---
@@ -67,7 +71,7 @@ if st.session_state.user_data is None:
                     st.success("Connexion réussie !")
                     st.rerun()
                 except Exception:
-                    st.error("Identifiants incorrects.")
+                    st.error("Identifiants incorrects ou compte non vérifié.")
 
     with tab2:
         st.info("⚠️ Un code d'invitation est requis pour s'inscrire.")
@@ -75,16 +79,13 @@ if st.session_state.user_data is None:
             new_email = st.text_input("Email")
             new_pwd = st.text_input("Mot de passe (6 caractères min.)", type="password")
             new_pseudo = st.text_input("Pseudo choisi")
-            # Champ pour le code secret
             user_invite_code = st.text_input(
                 "Code d'invitation secret", type="password"
             )
 
             if st.form_submit_button("S'inscrire"):
                 if user_invite_code != SECRET_INVITE_CODE:
-                    st.error(
-                        "❌ Code d'invitation incorrect. Demandez-le à l'administrateur."
-                    )
+                    st.error("❌ Code d'invitation incorrect.")
                 elif not new_email or not new_pwd or not new_pseudo:
                     st.warning("Veuillez remplir tous les champs.")
                 else:
@@ -106,24 +107,19 @@ user = fresh_user.data
 st.session_state.user_data = user
 
 # --- CALCUL DU RANG ---
-# On récupère tous les profils triés par Elo
 leaderboard_data = db.get_leaderboard().data
-# On trouve la position (index + 1) de l'utilisateur actuel
 try:
-    # On cherche l'index de l'utilisateur dont l'ID correspond à l'ID connecté
     user_rank = (
         next(i for i, p in enumerate(leaderboard_data) if p["id"] == user["id"]) + 1
     )
 except:
-    user_rank = "?"  # Au cas où il n'est pas encore dans le classement
+    user_rank = "?"
 
 # --- BARRE LATÉRALE ---
-st.sidebar.title("🎱 BlackBall Compétition")
+st.sidebar.title("🎱 BlackBall")
 st.sidebar.write(f"Joueur : **{user['username']}**")
-
-# Affichage des deux lignes demandées
 st.sidebar.write(f"Rang : **#{user_rank}**")
-st.sidebar.write(f"Elo : **{user['elo_rating']}**")  # Sans "pts" derrière
+st.sidebar.write(f"Elo : **{user['elo_rating']}**")
 
 menu_options = ["🏆 Classement", "🎯 Déclarer un match", "📑 Mes validations"]
 if user.get("is_admin"):
@@ -132,8 +128,8 @@ if user.get("is_admin"):
 page = st.sidebar.radio("Navigation", menu_options)
 
 if st.sidebar.button("Déconnexion"):
-    st.session_state.user_data = None
     db.supabase.auth.sign_out()
+    st.session_state.user_data = None
     st.rerun()
 
 # --- LOGIQUE DES PAGES ---
