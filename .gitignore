@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+
+# Streamlit (fichiers de config locale)
+.streamlit/config.toml
+# Note : Garde config.toml si tu veux partager ton thème, 
+# mais ignore secrets.toml !
+.streamlit/secrets.toml
+
+# Environnement / Secrets
+.env
+.secrets
+secrets.py
+
+# OS
+.DS_Store
+Thumbs.db
