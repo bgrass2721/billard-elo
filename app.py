@@ -104,7 +104,7 @@ if st.session_state.user_data is None:
         with st.form("signup_form"):
             new_email = st.text_input("Email")
             new_pwd = st.text_input("Mot de passe (6 caractères min.)", type="password")
-            new_pseudo = st.text_input("Pseudo choisi")
+            new_pseudo = st.text_input("Prénom Nom (le compte sera supprimé dans le cas contraire)")
             user_invite_code = st.text_input(
                 "Code d'invitation secret", type="password"
             )

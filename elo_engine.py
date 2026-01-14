@@ -6,12 +6,15 @@ class EloEngine:
         """
         Détermine le facteur K uniquement selon l'expérience du joueur.
         """
+        return 40
+        """
         if matches_played <= 10:
             return 40
         elif matches_played <= 30:
             return 20
         else:
             return 10
+        """
 
     def compute_new_ratings(self, winner_elo, loser_elo, winner_matches, loser_matches):
         # Probabilité de victoire du gagnant
