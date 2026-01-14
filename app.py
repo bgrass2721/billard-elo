@@ -147,7 +147,13 @@ st.sidebar.write(f"Joueur : **{user['username']}**")
 st.sidebar.write(f"Rang : **#{user_rank}**")
 st.sidebar.write(f"Elo : **{user['elo_rating']}**")
 
-menu_options = ["🏆 Classement", "🎯 Déclarer un match", "📑 Mes validations"]
+# Ajout de l'option "Face-à-Face" dans le menu
+menu_options = [
+    "🏆 Classement",
+    "🎯 Déclarer un match",
+    "🆚 Face-à-Face",
+    "📑 Mes validations",
+]
 if user.get("is_admin"):
     menu_options.append("🔧 Panel Admin")
 
@@ -159,7 +165,8 @@ if st.sidebar.button("Déconnexion"):
     st.session_state.user_data = None
     st.rerun()
 
-# --- LOGIQUE DES PAGES (Classement, Match, Admin...) ---
+# --- LOGIQUE DES PAGES ---
+
 if page == "🏆 Classement":
     st.header("🏆 Tableau des Leaders")
     res = db.get_leaderboard()
@@ -215,6 +222,88 @@ elif page == "🎯 Déclarer un match":
             st.info(f"Match contre {adv} : Rejet accepté")
         else:
             st.write(f"Match contre {adv} : {status.upper()}")
+
+# --- NOUVELLE SECTION : FACE-À-FACE ---
+elif page == "🆚 Face-à-Face":
+    st.header("🆚 Historique des Duels")
+
+    # 1. Récupérer la liste des adversaires possibles
+    players_res = db.get_leaderboard()
+    adversaires = [p for p in players_res.data if p["id"] != user["id"]]
+
+    if not adversaires:
+        st.warning("Pas assez de joueurs pour comparer.")
+    else:
+        # Créer un dictionnaire pour retrouver l'ID via le nom
+        adv_map = {p["username"]: p["id"] for p in adversaires}
+        selected_opponent_name = st.selectbox(
+            "Choisir un adversaire :", list(adv_map.keys())
+        )
+        opponent_id = adv_map[selected_opponent_name]
+
+        # 2. Récupérer TOUS les matchs validés où JE suis impliqué
+        response = (
+            db.supabase.table("matches")
+            .select("*, winner:winner_id(username), loser:loser_id(username)")
+            .or_(f"winner_id.eq.{user['id']},loser_id.eq.{user['id']}")
+            .eq("status", "validated")
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        all_my_matches = response.data
+
+        if not all_my_matches:
+            st.info("Vous n'avez pas encore joué de match validé.")
+        else:
+            # 3. Filtrer avec Pandas pour ne garder que ceux contre l'adversaire choisi
+            df = pd.DataFrame(all_my_matches)
+
+            # On garde les lignes où l'adversaire est soit le vainqueur, soit le perdant
+            mask = (df["winner_id"] == opponent_id) | (df["loser_id"] == opponent_id)
+            df_duel = df[mask].copy()
+
+            if df_duel.empty:
+                st.info(f"Aucun match trouvé contre {selected_opponent_name}.")
+            else:
+                # 4. Calcul des statistiques
+                nb_total = len(df_duel)
+                nb_victoires = len(df_duel[df_duel["winner_id"] == user["id"]])
+                nb_defaites = len(df_duel[df_duel["loser_id"] == user["id"]])
+
+                win_rate = (nb_victoires / nb_total) * 100
+
+                # 5. Affichage des KPIs
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Matchs", nb_total)
+                col2.metric("Victoires", f"{nb_victoires}", delta=f"{win_rate:.0f}%")
+                col3.metric("Défaites", f"{nb_defaites}")
+
+                st.divider()
+
+                # 6. Affichage de l'historique détaillé
+                st.subheader(f"Historique contre {selected_opponent_name}")
+
+                display_data = []
+                for _, row in df_duel.iterrows():
+                    is_win = row["winner_id"] == user["id"]
+                    res_icon = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
+                    date_str = pd.to_datetime(row["created_at"]).strftime("%d/%m/%Y")
+
+                    display_data.append(
+                        {
+                            "Date": date_str,
+                            "Résultat": res_icon,
+                            "Vainqueur": row["winner"]["username"],
+                            "Perdant": row["loser"]["username"],
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(display_data),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 elif page == "📑 Mes validations":
     st.header("📑 Matchs à confirmer")
