@@ -224,7 +224,7 @@ elif page == "🎯 Déclarer un match":
             st.write(f"Match contre {adv} : {status.upper()}")
 
 # --- NOUVELLE SECTION : FACE-À-FACE ---
-elif page == "🆚 Face-à-Face":
+elif page == "🆚 Historique des Duels":
     st.header("🆚 Historique des Duels")
 
     # 1. Récupérer la liste des adversaires possibles
