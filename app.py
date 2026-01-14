@@ -151,7 +151,7 @@ st.sidebar.write(f"Elo : **{user['elo_rating']}**")
 menu_options = [
     "🏆 Classement",
     "🎯 Déclarer un match",
-    "🆚 Face-à-Face",
+    "🆚 Historique des Duels",
     "📑 Mes validations",
     "📜 Règlement",
 ]
@@ -225,7 +225,7 @@ elif page == "🎯 Déclarer un match":
         else:
             st.write(f"Match contre {adv} : {status.upper()}")
 
-elif page == "🆚 Face-à-Face":
+elif page == "🆚 Historique des Duels":
     st.header("🆚 Historique des Duels")
 
     players_res = db.get_leaderboard()
