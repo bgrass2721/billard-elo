@@ -405,9 +405,44 @@ elif page == "🎯 Déclarer un match":
     else:
         adv_map = {p["username"]: p["id"] for p in adversaires}
         with st.form("match_form"):
-            adv_nom = st.selectbox("Contre qui avez-vous gagné ?", list(adv_map.keys()))
+            # 1. On ajoute index=None pour que la case soit vide au départ
+            # 2. On ajoute un placeholder pour guider l'utilisateur
+            adv_nom = st.selectbox(
+                "Contre qui avez-vous gagné ?",
+                list(adv_map.keys()),
+                index=None,
+                placeholder="Choisissez un joueur dans la liste...",
+            )
+
             if st.form_submit_button("Envoyer pour validation"):
-                db.declare_match(user["id"], adv_map[adv_nom], user["id"])
+                # --- SÉCURITÉ OBLIGATOIRE ---
+                # Si l'utilisateur n'a rien sélectionné, adv_nom vaut None.
+                if adv_nom is None:
+                    st.error("⚠️ Vous devez sélectionner un adversaire !")
+                    st.stop()  # On arrête tout ici
+
+                # --- SÉCURITÉ LOGIQUE (Celle qu'on a vue avant) ---
+                opponent_id = adv_map[adv_nom]
+
+                if opponent_id == user["id"]:
+                    st.error("Vous ne pouvez pas jouer contre vous-même.")
+                    st.stop()
+
+                # Vérif Anti-Spam
+                existing_pending = (
+                    db.supabase.table("matches")
+                    .select("*")
+                    .eq("winner_id", user["id"])
+                    .eq("loser_id", opponent_id)
+                    .eq("status", "pending")
+                    .execute()
+                )
+                if existing_pending.data:
+                    st.warning("Match déjà déclaré en attente.")
+                    st.stop()
+
+                # Envoi
+                db.declare_match(user["id"], opponent_id, user["id"])
                 st.success(f"Match envoyé à {adv_nom} !")
 
     st.divider()
