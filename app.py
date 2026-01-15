@@ -174,9 +174,16 @@ if page == "🏆 Classement":
     res = db.get_leaderboard()
     if res.data:
         df = pd.DataFrame(res.data)
+        
+        # --- FILTRE AJOUTÉ ---
+        # On ne garde que les lignes où 'matches_played' est supérieur à 0
+        df = df[df["matches_played"] > 0]
+        # ---------------------
+
         df = df[["username", "elo_rating", "matches_played"]]
         df.columns = ["Joueur", "Points Elo", "Matchs"]
         st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Enregistrer un résultat")
