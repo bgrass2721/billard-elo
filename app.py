@@ -441,6 +441,7 @@ elif page == "🎯 Déclarer un match":
 elif page == "🆚 Historique des Duels":
     st.header("🆚 Historique des Duels")
 
+    # 1. Menu de sélection
     players_res = db.get_leaderboard()
     adversaires = [p for p in players_res.data if p["id"] != user["id"]]
 
@@ -453,59 +454,101 @@ elif page == "🆚 Historique des Duels":
         )
         opponent_id = adv_map[selected_opponent_name]
 
-        response = (
+        # 2. CALCUL DE L'HISTORIQUE (REPLAY)
+        all_matches = (
             db.supabase.table("matches")
-            .select("*, winner:winner_id(username), loser:loser_id(username)")
-            .or_(f"winner_id.eq.{user['id']},loser_id.eq.{user['id']}")
+            .select("*")
             .eq("status", "validated")
-            .order("created_at", desc=True)
+            .order("created_at", desc=False)
             .execute()
+            .data
         )
 
-        all_my_matches = response.data
+        elo_tracker = {p["id"]: 1000 for p in players_res.data}
+        match_deltas = {}
 
-        if not all_my_matches:
-            st.info("Vous n'avez pas encore joué de match validé.")
+        engine = EloEngine()
+
+        for m in all_matches:
+            w_id = m["winner_id"]
+            l_id = m["loser_id"]
+
+            w_elo = elo_tracker.get(w_id, 1000)
+            l_elo = elo_tracker.get(l_id, 1000)
+
+            _, _, delta = engine.compute_new_ratings(w_elo, l_elo, 0, 0)
+
+            elo_tracker[w_id] += delta
+            elo_tracker[l_id] -= delta
+            match_deltas[m["id"]] = delta
+
+        # 3. FILTRAGE
+        all_matches.reverse()  # On veut les récents en premier pour le tableau
+
+        my_duels = []
+        for m in all_matches:
+            if (m["winner_id"] == user["id"] and m["loser_id"] == opponent_id) or (
+                m["winner_id"] == opponent_id and m["loser_id"] == user["id"]
+            ):
+                my_duels.append(m)
+
+        if not my_duels:
+            st.info(f"Aucun match validé trouvé contre {selected_opponent_name}.")
         else:
-            df = pd.DataFrame(all_my_matches)
-            mask = (df["winner_id"] == opponent_id) | (df["loser_id"] == opponent_id)
-            df_duel = df[mask].copy()
+            # 4. CALCULS STATISTIQUES
+            nb_total = len(my_duels)
+            nb_victoires = 0
+            total_elo_diff = 0  # <-- La nouvelle variable pour le total
 
-            if df_duel.empty:
-                st.info(f"Aucun match trouvé contre {selected_opponent_name}.")
-            else:
-                nb_total = len(df_duel)
-                nb_victoires = len(df_duel[df_duel["winner_id"] == user["id"]])
-                nb_defaites = len(df_duel[df_duel["loser_id"] == user["id"]])
-                win_rate = (nb_victoires / nb_total) * 100
+            for m in my_duels:
+                points = match_deltas.get(m["id"], 0)
+                if m["winner_id"] == user["id"]:
+                    nb_victoires += 1
+                    total_elo_diff += points  # J'ai gagné, j'ajoute
+                else:
+                    total_elo_diff -= points  # J'ai perdu, je soustrais
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Matchs", nb_total)
-                col2.metric("Victoires", f"{nb_victoires}", delta=f"{win_rate:.0f}%")
-                col3.metric("Défaites", f"{nb_defaites}")
+            nb_defaites = nb_total - nb_victoires
+            win_rate = (nb_victoires / nb_total) * 100
 
-                st.divider()
-                st.subheader(f"Historique contre {selected_opponent_name}")
+            # 5. AFFICHAGE DES MÉTRIQUES (4 Colonnes maintenant)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Matchs", nb_total)
+            c2.metric("Victoires", f"{nb_victoires}", delta=f"{win_rate:.0f}%")
+            c3.metric("Défaites", f"{nb_defaites}")
 
-                display_data = []
-                for _, row in df_duel.iterrows():
-                    is_win = row["winner_id"] == user["id"]
-                    res_icon = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-                    date_str = pd.to_datetime(row["created_at"]).strftime("%d/%m/%Y")
-                    display_data.append(
-                        {
-                            "Date": date_str,
-                            "Résultat": res_icon,
-                            "Vainqueur": row["winner"]["username"],
-                            "Perdant": row["loser"]["username"],
-                        }
-                    )
+            # Affichage du Bilan avec couleur automatique selon le signe
+            c4.metric(
+                "Bilan Points",
+                f"{total_elo_diff:+}",
+                help="Total des points gagnés ou perdus contre ce joueur",
+            )
 
-                st.dataframe(
-                    pd.DataFrame(display_data),
-                    use_container_width=True,
-                    hide_index=True,
+            st.divider()
+            st.subheader(f"Détail des rencontres")
+
+            display_data = []
+            for m in my_duels:
+                is_win = m["winner_id"] == user["id"]
+                date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m/%Y")
+                res_icon = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
+
+                points = match_deltas.get(m["id"], 0)
+                points_str = f"+{points}" if is_win else f"-{points}"
+
+                display_data.append(
+                    {
+                        "Date": date_str,
+                        "Résultat": res_icon,
+                        "Points Elo": points_str,
+                    }
                 )
+
+            st.dataframe(
+                pd.DataFrame(display_data),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 elif page == "📑 Mes validations":
     st.header("📑 Matchs à confirmer")
