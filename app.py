@@ -229,7 +229,7 @@ if page == "🏆 Classement":
     res = db.get_leaderboard()
     if res.data:
         df = pd.DataFrame(res.data)
-        
+
         # --- FILTRE AJOUTÉ ---
         # On ne garde que les lignes où 'matches_played' est supérieur à 0
         df = df[df["matches_played"] > 0]
@@ -430,6 +430,7 @@ elif page == "🔧 Panel Admin":
                 with st.expander(
                     f"Match {m['status'].upper()} - {m['winner']['username']} vs {m['loser']['username']}"
                 ):
+                    # --- CAS 1 : LITIGE ---
                     if m["status"] == "disputed":
                         st.error("⚖️ LITIGE DÉCLARÉ")
                         c1, c2 = st.columns(2)
@@ -439,6 +440,24 @@ elif page == "🔧 Panel Admin":
                         if c2.button("Confirmer Rejet ❌", key=f"f_r_{m['id']}"):
                             db.reject_match(m["id"])
                             st.rerun()
+
+                    # --- CAS 2 : EN ATTENTE
+                    elif m["status"] == "pending":
+                        st.info("⏳ EN ATTENTE DE VALIDATION")
+                        st.write("Ce match n'a pas encore été confirmé par le perdant.")
+
+                        c1, c2 = st.columns(2)
+                        # L'admin valide à la place du joueur
+                        if c1.button("Forcer Validation ✅", key=f"adm_val_{m['id']}"):
+                            db.validate_match_logic(m["id"])
+                            st.rerun()
+
+                        # L'admin supprime le match (spam/erreur)
+                        if c2.button("Supprimer le match 🗑️", key=f"adm_del_{m['id']}"):
+                            db.reject_match(m["id"])
+                            st.rerun()
+
+                    # --- CAS 3 : VALIDÉ ---
                     elif m["status"] == "validated":
                         st.warning("Match validé. Points transférés.")
                         if st.button("Révoquer le match ⚠️", key=f"rev_{m['id']}"):
