@@ -440,7 +440,8 @@ elif page == "👤 Profils Joueurs":
             )
 
             res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m")
+            # On ajoute %Hh%M pour afficher l'heure et les minutes
+            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
             points = m.get("elo_gain", 0)
             sign = "+" if is_win else "-"
 
@@ -748,7 +749,7 @@ elif page == "🆚 Historique des Parties":
                     stats_vs["elo_diff"] -= points
 
             # Préparation ligne tableau
-            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m/%Y")
+            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
             res_icon = "✅ VICTOIRE" if is_victory else "❌ DÉFAITE"
 
             # Info contextuelle
