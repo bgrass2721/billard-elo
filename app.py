@@ -174,20 +174,46 @@ fresh_user = (
 user = fresh_user.data
 st.session_state.user_data = user
 
-# --- CALCUL DU RANG ---
-leaderboard_data = db.get_leaderboard().data
+# --- CALCUL DES RANGS (1v1 et 2v2) ---
+
+# 1. Calcul du Rang SOLO
+lb_1v1 = db.get_leaderboard(mode="1v1").data
 try:
-    user_rank = (
-        next(i for i, p in enumerate(leaderboard_data) if p["id"] == user["id"]) + 1
-    )
-except:
-    user_rank = "?"
+    rank_1v1 = next(i for i, p in enumerate(lb_1v1) if p["id"] == user["id"]) + 1
+except StopIteration:
+    rank_1v1 = "-"
+
+# 2. Calcul du Rang DUO
+lb_2v2 = db.get_leaderboard(mode="2v2").data
+try:
+    # On cherche le rang dans la liste triée par Elo 2v2
+    rank_2v2 = next(i for i, p in enumerate(lb_2v2) if p["id"] == user["id"]) + 1
+except StopIteration:
+    rank_2v2 = "-"
 
 # --- BARRE LATÉRALE ---
 st.sidebar.title("🎱 BlackBall")
 st.sidebar.write(f"Joueur : **{user['username']}**")
-st.sidebar.write(f"Rang : **#{user_rank}**")
-st.sidebar.write(f"Elo : **{user['elo_rating']}**")
+
+st.sidebar.divider()
+
+# Affichage "Tableau de bord" avec des colonnes
+col_solo, col_duo = st.sidebar.columns(2)
+
+with col_solo:
+    st.markdown("### 👤 Solo")
+    st.write(f"Rang : **#{rank_1v1}**")
+    # On utilise st.metric pour un look plus "statistique"
+    st.metric("Elo", user.get("elo_rating", 1000))
+
+with col_duo:
+    st.markdown("### 👥 Duo")
+    st.write(f"Rang : **#{rank_2v2}**")
+    # Gestion du cas où l'Elo 2v2 est null ou vide
+    elo_duo = user.get("elo_2v2") if user.get("elo_2v2") else 1000
+    st.metric("Elo", elo_duo)
+
+st.sidebar.divider()
 
 # MENU NAVIGATION
 menu_options = [
@@ -281,7 +307,7 @@ elif page == "🏆 Classement":
 
 elif page == "👤 Profils Joueurs":
     # --- 0. SÉLECTION DU JOUEUR ---
-    players_res = db.get_leaderboard()  # On récupère tout le monde
+    players_res = db.get_leaderboard()
     if not players_res.data:
         st.error("Impossible de récupérer les joueurs.")
         st.stop()
@@ -312,7 +338,7 @@ elif page == "👤 Profils Joueurs":
     # --- 2. RÉCUPÉRATION DES MATCHS DU MODE CHOISI ---
     all_validated_matches = (
         db.supabase.table("matches")
-        .select("*")  # <--- Correction ici : on ne demande que les données brutes
+        .select("*")
         .eq("status", "validated")
         .eq("mode", target_mode_db)
         .order("created_at", desc=False)
@@ -320,28 +346,18 @@ elif page == "👤 Profils Joueurs":
         .data
     )
 
-    # --- 3. RECONSTRUCTION DE LA COURBE (REPLAY) ---
-    # On choisit sur quelle colonne de score on travaille
-    start_elo = 1000
+    # --- 3. RECONSTRUCTION DE LA COURBE & STATS ---
 
-    # Init du tracker pour tous les joueurs
-    elo_history = {p["id"]: 1000 for p in all_players}
+    # Init des compteurs
+    match_counter = 0
+    win_counter = 0
+    loss_counter = 0
 
     # Courbe du joueur ciblé
     target_elo_curve = [{"Numéro": 0, "Date": "Début", "Elo": 1000}]
 
-    engine = EloEngine()
-    match_counter = 0
-
     for m in all_validated_matches:
-        # On doit gérer le 2v2 pour la mise à jour des historiques de tout le monde
-        # Mais pour la courbe, on simplifie en regardant le résultat final
-
-        # Récupération des Elos actuels
-        # (Note: ici on simplifie le replay pour aller vite : on utilise le 'elo_gain' stocké si dispo
-        # ou on recalcule. Pour l'affichage profil, utiliser le elo_gain stocké est plus simple si ta DB est propre)
-
-        # Pour faire simple et robuste : On regarde si le joueur cible est impliqué
+        # Est-ce que le joueur cible est impliqué ?
         is_involved = (
             m["winner_id"] == target_user["id"]
             or m["loser_id"] == target_user["id"]
@@ -351,7 +367,9 @@ elif page == "👤 Profils Joueurs":
 
         if is_involved:
             match_counter += 1
-            date_display = pd.to_datetime(m["created_at"]).strftime("%d/%m")
+            # Formatage Date et Heure
+            # Astuce: Ajouter .tz_convert('Europe/Paris') si besoin
+            date_display = pd.to_datetime(m["created_at"]).strftime("%d/%m %Hh%M")
 
             # Est-ce une victoire ?
             is_win = (
@@ -359,10 +377,16 @@ elif page == "👤 Profils Joueurs":
                 or m.get("winner2_id") == target_user["id"]
             )
 
-            # Combien de points ? (On utilise la valeur stockée dans le match pour être cohérent)
+            # Mise à jour des compteurs
+            if is_win:
+                win_counter += 1
+            else:
+                loss_counter += 1
+
+            # Combien de points ?
             delta = m.get("elo_gain", 0)
             if delta is None:
-                delta = 0  # Sécurité
+                delta = 0
 
             # Mise à jour du score courant pour la courbe
             last_score = target_elo_curve[-1]["Elo"]
@@ -377,12 +401,12 @@ elif page == "👤 Profils Joueurs":
                 }
             )
 
-    # --- 4. AFFICHAGE DE LA COURBE ---
+    # --- 4. AFFICHAGE DE LA COURBE ET DES STATS ---
     st.subheader(f"📈 Évolution {view_mode}")
 
     if len(target_elo_curve) > 1:
+        # A. Le Graphique
         df_curve = pd.DataFrame(target_elo_curve)
-
         chart = (
             alt.Chart(df_curve)
             .mark_line(point=True, color="#3498db")
@@ -394,13 +418,22 @@ elif page == "👤 Profils Joueurs":
             .properties(height=350)
             .interactive()
         )
-
         st.altair_chart(chart, use_container_width=True)
 
-        # Métrique
-        current_val = target_elo_curve[-1]["Elo"]
-        diff_total = current_val - 1000
-        st.metric(f"Elo {view_mode} Actuel", current_val, delta=diff_total)
+        # B. Les Statistiques (C'est ICI que ça change)
+        current_elo = target_elo_curve[-1]["Elo"]
+        diff_total = current_elo - 1000
+
+        # Calcul du taux de victoire
+        win_rate = (win_counter / match_counter * 100) if match_counter > 0 else 0
+
+        # Affichage sur 4 colonnes
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric(f"Elo {view_mode}", current_elo, delta=diff_total)
+        k2.metric("Matchs Joués", match_counter)
+        k3.metric("Victoires", win_counter, f"{win_rate:.0f}%")
+        k4.metric("Défaites", loss_counter)
+
     else:
         st.info(
             f"{target_user['username']} n'a pas encore de match classé en {view_mode}."
@@ -411,7 +444,7 @@ elif page == "👤 Profils Joueurs":
     # --- 5. HISTORIQUE RÉCENT ---
     st.subheader(f"🗓️ Derniers Matchs ({view_mode})")
 
-    # CORRECTION : On filtre d'abord pour ne garder que les matchs où le joueur est impliqué
+    # On filtre pour ne garder que les matchs du joueur (déjà fait dans la boucle mais on refait propre pour l'affichage inversé)
     my_matches = []
     for m in all_validated_matches:
         if (
@@ -422,10 +455,8 @@ elif page == "👤 Profils Joueurs":
         ):
             my_matches.append(m)
 
-    # Ensuite on prend les 10 derniers de SA liste à lui
+    # On prend les 10 derniers
     recent_matches = my_matches[::-1][:10]
-
-    # Map ID -> Nom pour l'affichage
     id_name = {p["id"]: p["username"] for p in all_players}
 
     if not recent_matches:
@@ -433,26 +464,21 @@ elif page == "👤 Profils Joueurs":
     else:
         history_data = []
         for m in recent_matches:
-            # Est-ce que le user ciblé a gagné ?
             is_win = (
                 m["winner_id"] == target_user["id"]
                 or m.get("winner2_id") == target_user["id"]
             )
 
             res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-            # On ajoute %Hh%M pour afficher l'heure et les minutes
+            # Affichage de l'heure ici aussi
             date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
             points = m.get("elo_gain", 0)
             sign = "+" if is_win else "-"
 
-            # Qui était avec qui ?
             if target_mode_db == "1v1":
-                # Si j'ai gagné, l'adversaire est le perdant, sinon c'est le gagnant
                 opp_id = m["loser_id"] if is_win else m["winner_id"]
                 details = f"vs {id_name.get(opp_id, 'Inconnu')}"
             else:
-                # Logique d'affichage 2v2
-                # 1. Trouver mon allié
                 if m["winner_id"] == target_user["id"]:
                     my_mate = m.get("winner2_id")
                 elif m.get("winner2_id") == target_user["id"]:
@@ -464,7 +490,6 @@ elif page == "👤 Profils Joueurs":
 
                 mate_name = id_name.get(my_mate, "?")
 
-                # 2. Trouver les adversaires
                 if is_win:
                     opp_ids = [m["loser_id"], m.get("loser2_id")]
                 else:
