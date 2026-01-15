@@ -194,7 +194,7 @@ menu_options = [
     "🏆 Classement",
     "👤 Profils Joueurs",
     "🎯 Déclarer un match",
-    "🆚 Historique des Duels",
+    "🆚 Historique des Parties",
     "📑 Mes validations",
     "📜 Règlement",
 ]
@@ -227,36 +227,70 @@ if st.sidebar.button("Déconnexion"):
 
 # --- LOGIQUE DES PAGES ---
 
-if page == "🏆 Classement":
-    st.header("🏆 Tableau des Leaders")
-    res = db.get_leaderboard()
-    if res.data:
+elif page == "🏆 Classement":
+    st.header("🏆 Classement Général")
+
+    # 1. Le Sélecteur de Mode
+    ranking_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True)
+    mode_db = "1v1" if ranking_mode == "Solo (1v1)" else "2v2"
+
+    # 2. Récupération des données triées
+    res = db.get_leaderboard(mode=mode_db)
+
+    if not res.data:
+        st.info("Aucun joueur n'est encore inscrit.")
+    else:
+        # 3. Préparation des colonnes selon le mode
+        if mode_db == "1v1":
+            target_elo = "elo_rating"
+            target_matches = "matches_played"
+        else:
+            target_elo = "elo_2v2"
+            target_matches = "matches_2v2"
+
         df = pd.DataFrame(res.data)
 
-        # --- FILTRE AJOUTÉ ---
-        # On ne garde que les lignes où 'matches_played' est supérieur à 0
-        df = df[df["matches_played"] > 0]
-        # ---------------------
+        # --- LE FILTRE MAGIQUE ICI ---
+        # On ne garde que les lignes où la colonne target_matches est supérieure à 0
+        df = df[df[target_matches] > 0]
 
-        df = df[["username", "elo_rating", "matches_played"]]
-        df.columns = ["Joueur", "Points Elo", "Matchs"]
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        # Si après le filtre le tableau est vide (ex: personne n'a fait de 2v2)
+        if df.empty:
+            st.info("Aucun joueur classé (0 match joué) pour le moment dans ce mode.")
+        else:
+            # 4. Création du tableau propre
+            display_df = df[["username", target_elo, target_matches]].copy()
+
+            # On renomme les colonnes
+            display_df.columns = ["Joueur", "Points Elo", "Matchs"]
+
+            # IMPORTANT : On reset l'index pour que le classement reparte de 1, 2, 3...
+            # Sinon, si le 1er et le 2ème ont 0 match, le tableau commencerait à "3".
+            display_df.reset_index(drop=True, inplace=True)
+            display_df.index = display_df.index + 1
+
+            # 5. Affichage
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                column_config={
+                    "Points Elo": st.column_config.NumberColumn(format="%d ⭐️"),
+                    "Matchs": st.column_config.NumberColumn(format="%d 🎮"),
+                },
+            )
 
 elif page == "👤 Profils Joueurs":
-    # --- 0. SÉLECTION DU JOUEUR À ANALYSER ---
-    # On récupère la liste de tous les joueurs
-    players_res = db.get_leaderboard()
+    # --- 0. SÉLECTION DU JOUEUR ---
+    players_res = db.get_leaderboard()  # On récupère tout le monde
     if not players_res.data:
         st.error("Impossible de récupérer les joueurs.")
         st.stop()
 
     all_players = players_res.data
-    # On crée un dictionnaire {Pseudo: ID} pour retrouver l'ID facilement
     players_map = {p["username"]: p for p in all_players}
 
-    # Le menu déroulant (Par défaut sur MOI)
+    # Menu déroulant
     options = list(players_map.keys())
-    # On cherche l'index de mon pseudo pour le mettre par défaut
     try:
         default_index = options.index(user["username"])
     except ValueError:
@@ -265,68 +299,87 @@ elif page == "👤 Profils Joueurs":
     selected_username = st.selectbox(
         "Voir le profil de :", options, index=default_index
     )
-
-    # C'est lui qu'on va regarder (target_user)
     target_user = players_map[selected_username]
 
     st.header(f"👤 Profil de {target_user['username']}")
 
-    # --- 1. RÉCUPÉRATION DES DONNÉES ---
+    # --- 1. SÉLECTEUR DE MODE (1v1 / 2v2) ---
+    view_mode = st.radio(
+        "Voir les statistiques :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True
+    )
+    target_mode_db = "1v1" if view_mode == "Solo (1v1)" else "2v2"
+
+    # --- 2. RÉCUPÉRATION DES MATCHS DU MODE CHOISI ---
     all_validated_matches = (
         db.supabase.table("matches")
-        .select("*")
+        .select("*")  # <--- Correction ici : on ne demande que les données brutes
         .eq("status", "validated")
+        .eq("mode", target_mode_db)
         .order("created_at", desc=False)
         .execute()
         .data
     )
 
-    # --- 2. RECONSTRUCTION DE LA COURBE ELO ---
-    elo_history = {u["id"]: 1000 for u in all_players}
+    # --- 3. RECONSTRUCTION DE LA COURBE (REPLAY) ---
+    # On choisit sur quelle colonne de score on travaille
+    start_elo = 1000
 
-    # On prépare la courbe pour le joueur CIBLÉ (target_user)
-    target_elo_curve = [{"Numéro": 0, "Date": "Début", "Elo": 1000, "Adversaire": "-"}]
+    # Init du tracker pour tous les joueurs
+    elo_history = {p["id"]: 1000 for p in all_players}
+
+    # Courbe du joueur ciblé
+    target_elo_curve = [{"Numéro": 0, "Date": "Début", "Elo": 1000}]
 
     engine = EloEngine()
     match_counter = 0
 
     for m in all_validated_matches:
-        w_id = m["winner_id"]
-        l_id = m["loser_id"]
+        # On doit gérer le 2v2 pour la mise à jour des historiques de tout le monde
+        # Mais pour la courbe, on simplifie en regardant le résultat final
 
-        w_elo = elo_history.get(w_id, 1000)
-        l_elo = elo_history.get(l_id, 1000)
+        # Récupération des Elos actuels
+        # (Note: ici on simplifie le replay pour aller vite : on utilise le 'elo_gain' stocké si dispo
+        # ou on recalcule. Pour l'affichage profil, utiliser le elo_gain stocké est plus simple si ta DB est propre)
 
-        # Calcul
-        new_w, new_l, _ = engine.compute_new_ratings(w_elo, l_elo, 0, 0)
+        # Pour faire simple et robuste : On regarde si le joueur cible est impliqué
+        is_involved = (
+            m["winner_id"] == target_user["id"]
+            or m["loser_id"] == target_user["id"]
+            or m.get("winner2_id") == target_user["id"]
+            or m.get("loser2_id") == target_user["id"]
+        )
 
-        # Mise à jour globale
-        elo_history[w_id] = new_w
-        elo_history[l_id] = new_l
-
-        # Si le match concerne le joueur CIBLÉ, on l'ajoute à sa courbe
-        if w_id == target_user["id"] or l_id == target_user["id"]:
+        if is_involved:
             match_counter += 1
             date_display = pd.to_datetime(m["created_at"]).strftime("%d/%m")
 
-            is_win = w_id == target_user["id"]
-            # Son score après ce match
-            current_elo = new_w if is_win else new_l
+            # Est-ce une victoire ?
+            is_win = (
+                m["winner_id"] == target_user["id"]
+                or m.get("winner2_id") == target_user["id"]
+            )
+
+            # Combien de points ? (On utilise la valeur stockée dans le match pour être cohérent)
+            delta = m.get("elo_gain", 0)
+            if delta is None:
+                delta = 0  # Sécurité
+
+            # Mise à jour du score courant pour la courbe
+            last_score = target_elo_curve[-1]["Elo"]
+            new_score = last_score + delta if is_win else last_score - delta
 
             target_elo_curve.append(
                 {
                     "Numéro": match_counter,
                     "Date": date_display,
-                    "Elo": current_elo,
+                    "Elo": new_score,
                     "Résultat": "Victoire" if is_win else "Défaite",
                 }
             )
 
-    # --- 3. AFFICHAGE DE LA COURBE (ALTAIR) ---
-    st.subheader("📈 Évolution du classement")
+    # --- 4. AFFICHAGE DE LA COURBE ---
+    st.subheader(f"📈 Évolution {view_mode}")
 
-    # CORRECTION ICI : On met "> 1" au lieu de "> 0"
-    # On veut s'assurer qu'il y a au moins un VRAI match joué en plus du point de départ.
     if len(target_elo_curve) > 1:
         df_curve = pd.DataFrame(target_elo_curve)
 
@@ -334,61 +387,98 @@ elif page == "👤 Profils Joueurs":
             alt.Chart(df_curve)
             .mark_line(point=True, color="#3498db")
             .encode(
-                x=alt.X("Numéro", title="Progression (Match après match)"),
+                x=alt.X("Numéro", title="Progression (Matchs joués)"),
                 y=alt.Y("Elo", scale=alt.Scale(zero=False), title="Score Elo"),
                 tooltip=["Date", "Elo", "Résultat"],
             )
-            .properties(height=400)
+            .properties(height=350)
             .interactive()
         )
 
         st.altair_chart(chart, use_container_width=True)
 
-        # Indicateur (Stat du joueur ciblé)
-        current_elo = target_elo_curve[-1]["Elo"]
-        start_elo = 1000
-        diff = current_elo - start_elo
-
-        st.metric(f"Elo Actuel de {target_user['username']}", current_elo, delta=diff)
-
+        # Métrique
+        current_val = target_elo_curve[-1]["Elo"]
+        diff_total = current_val - 1000
+        st.metric(f"Elo {view_mode} Actuel", current_val, delta=diff_total)
     else:
-        # C'est ce message qui s'affichera proprement maintenant
         st.info(
-            f"Pas de statistiques : {target_user['username']} n'a pas encore joué de match validé."
+            f"{target_user['username']} n'a pas encore de match classé en {view_mode}."
         )
 
     st.divider()
 
-    # --- 4. LISTE DES DERNIERS MATCHS DU CIBLÉ ---
-    st.subheader(f"🗓️ Derniers Matchs de {target_user['username']}")
+    # --- 5. HISTORIQUE RÉCENT ---
+    st.subheader(f"🗓️ Derniers Matchs ({view_mode})")
 
-    # On filtre les matchs du joueur CIBLÉ
-    target_matches = [
-        m
-        for m in all_validated_matches
-        if m["winner_id"] == target_user["id"] or m["loser_id"] == target_user["id"]
-    ]
-    target_matches.reverse()  # Du plus récent au plus vieux
+    # CORRECTION : On filtre d'abord pour ne garder que les matchs où le joueur est impliqué
+    my_matches = []
+    for m in all_validated_matches:
+        if (
+            m["winner_id"] == target_user["id"]
+            or m["loser_id"] == target_user["id"]
+            or m.get("winner2_id") == target_user["id"]
+            or m.get("loser2_id") == target_user["id"]
+        ):
+            my_matches.append(m)
 
-    if not target_matches:
-        st.write("Aucun match trouvé.")
+    # Ensuite on prend les 10 derniers de SA liste à lui
+    recent_matches = my_matches[::-1][:10]
+
+    # Map ID -> Nom pour l'affichage
+    id_name = {p["id"]: p["username"] for p in all_players}
+
+    if not recent_matches:
+        st.write("Aucun historique dans ce mode.")
     else:
         history_data = []
-        # Mapping ID -> Nom pour l'affichage des adversaires
-        id_to_name = {p["id"]: p["username"] for p in all_players}
+        for m in recent_matches:
+            # Est-ce que le user ciblé a gagné ?
+            is_win = (
+                m["winner_id"] == target_user["id"]
+                or m.get("winner2_id") == target_user["id"]
+            )
 
-        for m in target_matches[:10]:
-            is_win = m["winner_id"] == target_user["id"]
+            res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
+            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m")
+            points = m.get("elo_gain", 0)
+            sign = "+" if is_win else "-"
 
-            # L'adversaire est celui qui n'est PAS le joueur ciblé
-            opponent_id = m["loser_id"] if is_win else m["winner_id"]
-            opponent_name = id_to_name.get(opponent_id, "Inconnu")
+            # Qui était avec qui ?
+            if target_mode_db == "1v1":
+                # Si j'ai gagné, l'adversaire est le perdant, sinon c'est le gagnant
+                opp_id = m["loser_id"] if is_win else m["winner_id"]
+                details = f"vs {id_name.get(opp_id, 'Inconnu')}"
+            else:
+                # Logique d'affichage 2v2
+                # 1. Trouver mon allié
+                if m["winner_id"] == target_user["id"]:
+                    my_mate = m.get("winner2_id")
+                elif m.get("winner2_id") == target_user["id"]:
+                    my_mate = m["winner_id"]
+                elif m["loser_id"] == target_user["id"]:
+                    my_mate = m.get("loser2_id")
+                else:
+                    my_mate = m["loser_id"]
 
-            result_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m %H:%M")
+                mate_name = id_name.get(my_mate, "?")
+
+                # 2. Trouver les adversaires
+                if is_win:
+                    opp_ids = [m["loser_id"], m.get("loser2_id")]
+                else:
+                    opp_ids = [m["winner_id"], m.get("winner2_id")]
+
+                opp_names = [id_name.get(oid, "?") for oid in opp_ids if oid]
+                details = f"Avec {mate_name} vs {' & '.join(opp_names)}"
 
             history_data.append(
-                {"Date": date_str, "Résultat": result_str, "Adversaire": opponent_name}
+                {
+                    "Date": date_str,
+                    "Résultat": res_str,
+                    "Détails": details,
+                    "Points": f"{sign}{points}",
+                }
             )
 
         st.dataframe(
@@ -396,197 +486,348 @@ elif page == "👤 Profils Joueurs":
         )
 
 elif page == "🎯 Déclarer un match":
-    st.header("🎯 Enregistrer un résultat")
+    st.header("🎯 Déclarer un résultat")
+
+    # 1. Choix du mode de jeu
+    mode_input = st.radio("Type de match", ["👤 1 vs 1", "👥 2 vs 2"], horizontal=True)
+
+    # Récupération de la liste des joueurs (sauf moi-même)
     players_res = db.get_leaderboard()
-    adversaires = [p for p in players_res.data if p["id"] != user["id"]]
+    # On gère le cas où la liste est vide ou None
+    all_players = players_res.data if players_res.data else []
+    adv_map = {p["username"]: p["id"] for p in all_players if p["id"] != user["id"]}
 
-    if not adversaires:
-        st.warning("Aucun autre joueur inscrit.")
+    if not adv_map:
+        st.warning("Il n'y a pas assez de joueurs inscrits pour déclarer un match.")
     else:
-        adv_map = {p["username"]: p["id"] for p in adversaires}
         with st.form("match_form"):
-            # 1. On ajoute index=None pour que la case soit vide au départ
-            # 2. On ajoute un placeholder pour guider l'utilisateur
-            adv_nom = st.selectbox(
-                "Contre qui avez-vous gagné ?",
-                list(adv_map.keys()),
-                index=None,
-                placeholder="Choisissez un joueur dans la liste...",
-            )
-
-            if st.form_submit_button("Envoyer pour validation"):
-                # --- SÉCURITÉ OBLIGATOIRE ---
-                # Si l'utilisateur n'a rien sélectionné, adv_nom vaut None.
-                if adv_nom is None:
-                    st.error("⚠️ Vous devez sélectionner un adversaire !")
-                    st.stop()  # On arrête tout ici
-
-                # --- SÉCURITÉ LOGIQUE (Celle qu'on a vue avant) ---
-                opponent_id = adv_map[adv_nom]
-
-                if opponent_id == user["id"]:
-                    st.error("Vous ne pouvez pas jouer contre vous-même.")
-                    st.stop()
-
-                # Vérif Anti-Spam
-                existing_pending = (
-                    db.supabase.table("matches")
-                    .select("*")
-                    .eq("winner_id", user["id"])
-                    .eq("loser_id", opponent_id)
-                    .eq("status", "pending")
-                    .execute()
+            # --- INTERFACE 1 vs 1 ---
+            if mode_input == "👤 1 vs 1":
+                adv_nom = st.selectbox(
+                    "J'ai gagné contre :",
+                    list(adv_map.keys()),
+                    index=None,
+                    placeholder="Choisir un adversaire...",
                 )
-                if existing_pending.data:
-                    st.warning("Match déjà déclaré en attente.")
-                    st.stop()
+                # On met les autres à None pour éviter les erreurs de variables
+                partner_nom = None
+                adv2_nom = None
 
-                # Envoi
-                db.declare_match(user["id"], opponent_id, user["id"])
-                st.success(f"Match envoyé à {adv_nom} !")
+            # --- INTERFACE 2 vs 2 ---
+            else:
+                c1, c2 = st.columns(2)
+                # Mon coéquipier
+                partner_nom = c1.selectbox(
+                    "Mon coéquipier :",
+                    list(adv_map.keys()),
+                    index=None,
+                    placeholder="Qui était avec toi ?",
+                )
 
+                # Les adversaires
+                adv_nom = c2.selectbox(
+                    "Adversaire 1 :",
+                    list(adv_map.keys()),
+                    index=None,
+                    placeholder="Adversaire 1",
+                )
+                adv2_nom = c2.selectbox(
+                    "Adversaire 2 :",
+                    list(adv_map.keys()),
+                    index=None,
+                    placeholder="Adversaire 2",
+                )
+
+            submitted = st.form_submit_button("Envoyer pour validation")
+
+            if submitted:
+                # ==========================================
+                # LOGIQUE DE VALIDATION ET ENVOI
+                # ==========================================
+
+                # CAS 1 : MODE 1 vs 1
+                if mode_input == "👤 1 vs 1":
+                    # Sécurité : Champ vide
+                    if adv_nom is None:
+                        st.error("⚠️ Vous devez sélectionner un adversaire !")
+                        st.stop()
+
+                    # Sécurité : Anti-Spam (Vérifier si match déjà en attente)
+                    opponent_id = adv_map[adv_nom]
+                    existing = (
+                        db.supabase.table("matches")
+                        .select("*")
+                        .eq("winner_id", user["id"])
+                        .eq("loser_id", opponent_id)
+                        .eq("status", "pending")
+                        .execute()
+                    )
+
+                    if existing.data:
+                        st.warning(
+                            "Un match contre ce joueur est déjà en attente de validation."
+                        )
+                        st.stop()
+
+                    # Envoi 1v1
+                    db.declare_match(user["id"], opponent_id, user["id"], mode="1v1")
+
+                # CAS 2 : MODE 2 vs 2
+                else:
+                    # Sécurité : Champs vides
+                    if not (partner_nom and adv_nom and adv2_nom):
+                        st.error("⚠️ Veuillez remplir les 3 autres joueurs !")
+                        st.stop()
+
+                    # Sécurité : Doublons (ex: Paul partenaire ET adversaire)
+                    # On utilise un 'set' pour compter les joueurs uniques
+                    selected_players = {partner_nom, adv_nom, adv2_nom}
+                    if len(selected_players) < 3:
+                        st.error("⚠️ Un joueur ne peut pas être sélectionné deux fois.")
+                        st.stop()
+
+                    # Envoi 2v2
+                    db.declare_match(
+                        winner_id=user["id"],
+                        loser_id=adv_map[adv_nom],
+                        created_by_id=user["id"],
+                        winner2_id=adv_map[partner_nom],
+                        loser2_id=adv_map[adv2_nom],
+                        mode="2v2",
+                    )
+
+                st.success("Match envoyé avec succès ! 🚀")
+                st.balloons()
+
+    # --- SECTION BAS DE PAGE : HISTORIQUE DES DÉCLARATIONS ---
     st.divider()
     st.subheader("Mes déclarations récentes")
+
+    # On récupère mes victoires récentes pour voir les statuts
     my_wins = (
         db.supabase.table("matches")
-        .select("*, profiles!loser_id(username)")
-        .eq("winner_id", user["id"])
+        .select("*, profiles!loser_id(username)")  # On récupère le nom du perdant 1
+        .eq("created_by", user["id"])  # On filtre sur ceux que J'AI créés
         .order("created_at", desc=True)
         .limit(5)
         .execute()
         .data
     )
-    for w in my_wins:
-        status = w["status"]
-        adv = w.get("profiles", {}).get("username", "Inconnu")
-        if status == "rejected":
-            st.error(f"Victoire contre {adv} refusée")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Accepter le rejet ✅", key=f"acc_{w['id']}"):
-                    db.accept_rejection(w["id"])
-                    st.rerun()
-            with c2:
-                if st.button("Contester ⚖️", key=f"disp_{w['id']}"):
-                    db.dispute_match(w["id"])
-                    st.rerun()
-        elif status == "disputed":
-            st.warning(f"⚖️ Litige en cours contre {adv}")
-        elif status == "rejected_confirmed":
-            st.info(f"Match contre {adv} : Rejet accepté")
-        else:
-            st.write(f"Match contre {adv} : {status.upper()}")
 
-elif page == "🆚 Historique des Duels":
-    st.header("🆚 Historique des Duels")
+    if not my_wins:
+        st.info("Aucune déclaration récente.")
+    else:
+        for w in my_wins:
+            status = w["status"]
+            # Petit trick pour récupérer le nom : en 2v2 c'est parfois plus complexe,
+            # mais on affiche au moins le perdant principal pour se repérer.
+            adv = w.get("profiles", {}).get("username", "Inconnu")
+            mode_display = " (2v2)" if w.get("mode") == "2v2" else ""
 
-    # 1. Menu de sélection
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"**VS {adv}** {mode_display}")
+
+                if status == "pending":
+                    c2.info("⏳ En attente")
+                elif status == "validated":
+                    c2.success("✅ Validé")
+
+                elif status == "rejected":
+                    c2.error("❌ Refusé")
+                    st.write("Votre adversaire a refusé ce match.")
+                    col_btn1, col_btn2 = st.columns(2)
+                    if col_btn1.button(
+                        "Accepter le rejet (Supprimer)", key=f"acc_{w['id']}"
+                    ):
+                        db.accept_rejection(w["id"])
+                        st.rerun()
+                    if col_btn2.button("Contester (Litige)", key=f"disp_{w['id']}"):
+                        db.dispute_match(w["id"])
+                        st.rerun()
+
+                elif status == "disputed":
+                    c2.warning("⚖️ Litige")
+                    st.caption("Un administrateur va trancher.")
+
+                elif status == "rejected_confirmed":
+                    c2.write("🗑️ Supprimé")
+
+elif page == "🆚 Historique des Parties":
+    st.header("🆚 Historique des Parties")
+
+    # 1. Menu de sélection des joueurs
     players_res = db.get_leaderboard()
+    if not players_res.data:
+        st.warning("Aucun joueur trouvé.")
+        st.stop()
+
     adversaires = [p for p in players_res.data if p["id"] != user["id"]]
+    id_name = {p["id"]: p["username"] for p in players_res.data}
 
     if not adversaires:
-        st.warning("Pas assez de joueurs pour comparer.")
+        st.warning("Pas assez de joueurs.")
     else:
+        # A. Choix du JOUEUR CIBLE
         adv_map = {p["username"]: p["id"] for p in adversaires}
         selected_opponent_name = st.selectbox(
-            "Choisir un adversaire :", list(adv_map.keys())
+            "Voir mon historique avec :", list(adv_map.keys())
         )
         opponent_id = adv_map[selected_opponent_name]
 
-        # 2. CALCUL DE L'HISTORIQUE (REPLAY)
+        # B. Choix du MODE (FILTRE STRICT)
+        # C'est ce bouton qui empêche le mélange des points
+        hist_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True)
+        target_db_mode = "1v1" if hist_mode == "Solo (1v1)" else "2v2"
+
+        # 2. Récupération des matchs (Filtrés dès la requête SQL)
         all_matches = (
             db.supabase.table("matches")
             .select("*")
             .eq("status", "validated")
-            .order("created_at", desc=False)
+            .eq("mode", target_db_mode)  # <--- ON NE CHARGE QUE LE BON MODE
+            .order("created_at", desc=True)
             .execute()
             .data
         )
 
-        elo_tracker = {p["id"]: 1000 for p in players_res.data}
-        match_deltas = {}
+        # 3. Analyse des interactions
+        history_data = []
 
-        engine = EloEngine()
+        # Stats : On distingue "Adversaire" et "Partenaire" (seulement possible en 2v2)
+        stats_vs = {"played": 0, "win": 0, "loss": 0, "elo_diff": 0}
+        stats_coop = {"played": 0, "win": 0, "loss": 0, "elo_diff": 0}
 
         for m in all_matches:
-            w_id = m["winner_id"]
-            l_id = m["loser_id"]
+            # Suis-je dans le match ?
+            i_am_winner = (
+                m["winner_id"] == user["id"] or m.get("winner2_id") == user["id"]
+            )
+            i_am_loser = m["loser_id"] == user["id"] or m.get("loser2_id") == user["id"]
 
-            w_elo = elo_tracker.get(w_id, 1000)
-            l_elo = elo_tracker.get(l_id, 1000)
+            if not (i_am_winner or i_am_loser):
+                continue
 
-            _, _, delta = engine.compute_new_ratings(w_elo, l_elo, 0, 0)
-
-            elo_tracker[w_id] += delta
-            elo_tracker[l_id] -= delta
-            match_deltas[m["id"]] = delta
-
-        # 3. FILTRAGE
-        all_matches.reverse()  # On veut les récents en premier pour le tableau
-
-        my_duels = []
-        for m in all_matches:
-            if (m["winner_id"] == user["id"] and m["loser_id"] == opponent_id) or (
-                m["winner_id"] == opponent_id and m["loser_id"] == user["id"]
-            ):
-                my_duels.append(m)
-
-        if not my_duels:
-            st.info(f"Aucun match validé trouvé contre {selected_opponent_name}.")
-        else:
-            # 4. CALCULS STATISTIQUES
-            nb_total = len(my_duels)
-            nb_victoires = 0
-            total_elo_diff = 0  # <-- La nouvelle variable pour le total
-
-            for m in my_duels:
-                points = match_deltas.get(m["id"], 0)
-                if m["winner_id"] == user["id"]:
-                    nb_victoires += 1
-                    total_elo_diff += points  # J'ai gagné, j'ajoute
-                else:
-                    total_elo_diff -= points  # J'ai perdu, je soustrais
-
-            nb_defaites = nb_total - nb_victoires
-            win_rate = (nb_victoires / nb_total) * 100
-
-            # 5. AFFICHAGE DES MÉTRIQUES (4 Colonnes maintenant)
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Matchs", nb_total)
-            c2.metric("Victoires", f"{nb_victoires}", delta=f"{win_rate:.0f}%")
-            c3.metric("Défaites", f"{nb_defaites}")
-
-            # Affichage du Bilan avec couleur automatique selon le signe
-            c4.metric(
-                "Bilan Points",
-                f"{total_elo_diff:+}",
-                help="Total des points gagnés ou perdus contre ce joueur",
+            # Est-ce que L'AUTRE est dans le match ?
+            opp_is_winner = (
+                m["winner_id"] == opponent_id or m.get("winner2_id") == opponent_id
+            )
+            opp_is_loser = (
+                m["loser_id"] == opponent_id or m.get("loser2_id") == opponent_id
             )
 
-            st.divider()
-            st.subheader(f"Détail des rencontres")
+            if not (opp_is_winner or opp_is_loser):
+                continue
 
-            display_data = []
-            for m in my_duels:
-                is_win = m["winner_id"] == user["id"]
-                date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m/%Y")
-                res_icon = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
+            # --- ANALYSE ---
+            is_victory = i_am_winner
+            points = m.get("elo_gain", 0)
+            if points is None:
+                points = 0
 
-                points = match_deltas.get(m["id"], 0)
-                points_str = f"+{points}" if is_win else f"-{points}"
+            # Cas 1 : Nous étions PARTENAIRES (Même coté) - Impossible en 1v1
+            if (i_am_winner and opp_is_winner) or (i_am_loser and opp_is_loser):
+                relation_type = "🤝 Partenaire"
+                stats_coop["played"] += 1
+                if is_victory:
+                    stats_coop["win"] += 1
+                    stats_coop["elo_diff"] += points
+                else:
+                    stats_coop["loss"] += 1
+                    stats_coop["elo_diff"] -= points
 
-                display_data.append(
-                    {
-                        "Date": date_str,
-                        "Résultat": res_icon,
-                        "Points Elo": points_str,
-                    }
+            # Cas 2 : Nous étions ADVERSAIRES (Cotés opposés)
+            else:
+                relation_type = "⚔️ Adversaire"
+                stats_vs["played"] += 1
+                if is_victory:
+                    stats_vs["win"] += 1
+                    stats_vs["elo_diff"] += points
+                else:
+                    stats_vs["loss"] += 1
+                    stats_vs["elo_diff"] -= points
+
+            # Préparation ligne tableau
+            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m/%Y")
+            res_icon = "✅ VICTOIRE" if is_victory else "❌ DÉFAITE"
+
+            # Info contextuelle
+            if target_db_mode == "1v1":
+                info_sup = "Duel classique"
+            else:
+                # En 2v2, on précise avec qui on jouait
+                # Trouver mon partenaire à MOI
+                if m["winner_id"] == user["id"]:
+                    my_mate_id = m.get("winner2_id")
+                elif m.get("winner2_id") == user["id"]:
+                    my_mate_id = m["winner_id"]
+                elif m["loser_id"] == user["id"]:
+                    my_mate_id = m.get("loser2_id")
+                else:
+                    my_mate_id = m["loser_id"]
+
+                mate_name = id_name.get(my_mate_id, "?")
+                info_sup = f"Moi & {mate_name}"
+
+            history_data.append(
+                {
+                    "Date": date_str,
+                    "Relation": relation_type,
+                    "Résultat": res_icon,
+                    "Détail": info_sup,
+                    "Points": f"{points:+}" if is_victory else f"{-points:+}",
+                }
+            )
+
+        # 4. AFFICHAGE
+
+        # A. Statistiques Face-à-Face (Toujours pertinent)
+        st.subheader(f"⚔️ Face-à-Face ({hist_mode})")
+        if stats_vs["played"] == 0:
+            st.info(f"Aucun match l'un contre l'autre en {hist_mode}.")
+        else:
+            wr_vs = (stats_vs["win"] / stats_vs["played"]) * 100
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Matchs", stats_vs["played"])
+            c2.metric("Victoires", stats_vs["win"], f"{wr_vs:.0f}%")
+            c3.metric("Défaites", stats_vs["loss"])
+            c4.metric(
+                f"Bilan Elo {target_db_mode}",
+                f"{stats_vs['elo_diff']:+}",
+                help="Total des points échangés",
+            )
+
+        st.divider()
+
+        # B. Statistiques Coop (Affiché systématiquement en mode 2v2)
+        if target_db_mode == "2v2":
+            st.subheader(f"🤝 En Équipe avec {selected_opponent_name}")
+
+            if stats_coop["played"] == 0:
+                st.info(
+                    f"Vous n'avez jamais joué en équipe avec {selected_opponent_name}."
+                )
+            else:
+                wr_coop = (stats_coop["win"] / stats_coop["played"]) * 100
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Duos joués", stats_coop["played"])
+                k2.metric("Victoires", stats_coop["win"], f"{wr_coop:.0f}%")
+                k3.metric("Défaites", stats_coop["loss"])
+                k4.metric(
+                    "Gain Elo (2v2)",
+                    f"{stats_coop['elo_diff']:+}",
+                    help="Points gagnés ensemble",
                 )
 
+            st.divider()
+
+        # 5. Tableau
+        st.subheader("Historique détaillé")
+        if not history_data:
+            st.write("Rien à afficher avec ces filtres.")
+        else:
             st.dataframe(
-                pd.DataFrame(display_data),
-                use_container_width=True,
-                hide_index=True,
+                pd.DataFrame(history_data), use_container_width=True, hide_index=True
             )
 
 elif page == "📑 Mes validations":

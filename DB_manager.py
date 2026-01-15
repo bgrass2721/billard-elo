@@ -37,22 +37,34 @@ class DBManager:
             .execute()
         )
 
-    def get_leaderboard(self):
-        """Récupère le classement trié par Elo descendante"""
+    def get_leaderboard(self, mode="1v1"):
+        # On choisit la colonne de tri selon le mode
+        sort_col = "elo_rating" if mode == "1v1" else "elo_2v2"
+
         return (
             self.supabase.table("profiles")
             .select("*")
-            .order("elo_rating", desc=True)
+            .order(sort_col, desc=True)
             .execute()
         )
 
-    def declare_match(self, winner_id, loser_id, created_by_id):
-        """Crée un match en attente"""
+    def declare_match(
+        self,
+        winner_id,
+        loser_id,
+        created_by_id,
+        winner2_id=None,
+        loser2_id=None,
+        mode="1v1",
+    ):
         data = {
             "winner_id": winner_id,
             "loser_id": loser_id,
             "created_by": created_by_id,
             "status": "pending",
+            "mode": mode,  # Nouveau
+            "winner2_id": winner2_id,  # Nouveau (peut être None)
+            "loser2_id": loser2_id,  # Nouveau (peut être None)
         }
         return self.supabase.table("matches").insert(data).execute()
 
@@ -172,7 +184,12 @@ class DBManager:
 
     def validate_match_logic(self, match_id):
         try:
-            # 1. Récupération sécurisée des données du match
+            # Import du moteur (si ce n'est pas fait en haut du fichier)
+            from elo_engine import EloEngine
+
+            engine = EloEngine()
+
+            # 1. Récupération sécurisée du match
             match_res = (
                 self.supabase.table("matches")
                 .select("*")
@@ -182,51 +199,118 @@ class DBManager:
             )
             match = match_res.data
 
-            # 2. Récupération des profils avec leurs statistiques à jour
-            winner = (
-                self.supabase.table("profiles")
-                .select("*")
-                .eq("id", match["winner_id"])
-                .single()
-                .execute()
-                .data
-            )
-            loser = (
-                self.supabase.table("profiles")
-                .select("*")
-                .eq("id", match["loser_id"])
-                .single()
-                .execute()
-                .data
-            )
+            # Petite sécurité : si déjà validé, on ne refait pas le calcul
+            if match["status"] == "validated":
+                return True, "Ce match est déjà validé."
 
-            # 3. Calcul via ton moteur EloEngine
-            from elo_engine import EloEngine
+            # On récupère le mode (par défaut '1v1' si l'info manque)
+            mode = match.get("mode", "1v1")
+            delta = 0  # Variable pour stocker les points échangés
 
-            engine = EloEngine()
+            # =========================================================
+            # SCÉNARIO 1 : MODE 1 vs 1 (CLASSIQUE)
+            # =========================================================
+            if mode == "1v1":
+                # Récupération des profils
+                winner = (
+                    self.supabase.table("profiles")
+                    .select("*")
+                    .eq("id", match["winner_id"])
+                    .single()
+                    .execute()
+                    .data
+                )
+                loser = (
+                    self.supabase.table("profiles")
+                    .select("*")
+                    .eq("id", match["loser_id"])
+                    .single()
+                    .execute()
+                    .data
+                )
 
-            new_w_elo, new_l_elo, delta = engine.compute_new_ratings(
-                winner["elo_rating"],
-                loser["elo_rating"],
-                winner["matches_played"],
-                loser["matches_played"],
-            )
+                # Calcul Elo 1v1
+                new_w_elo, new_l_elo, delta = engine.compute_new_ratings(
+                    winner["elo_rating"],
+                    loser["elo_rating"],
+                    winner["matches_played"],
+                    loser["matches_played"],
+                )
 
-            # 4. Enregistrement des changements
-            # On met à jour le gagnant
-            self.supabase.table("profiles").update(
-                {
-                    "elo_rating": new_w_elo,
-                    "matches_played": winner["matches_played"] + 1,
-                }
-            ).eq("id", winner["id"]).execute()
+                # Mise à jour GAGNANT (Colonne 1v1)
+                self.supabase.table("profiles").update(
+                    {
+                        "elo_rating": new_w_elo,
+                        "matches_played": winner["matches_played"] + 1,
+                    }
+                ).eq("id", winner["id"]).execute()
 
-            # On met à jour le perdant
-            self.supabase.table("profiles").update(
-                {"elo_rating": new_l_elo, "matches_played": loser["matches_played"] + 1}
-            ).eq("id", loser["id"]).execute()
+                # Mise à jour PERDANT (Colonne 1v1)
+                self.supabase.table("profiles").update(
+                    {
+                        "elo_rating": new_l_elo,
+                        "matches_played": loser["matches_played"] + 1,
+                    }
+                ).eq("id", loser["id"]).execute()
 
-            # On valide définitivement le match
+            # =========================================================
+            # SCÉNARIO 2 : MODE 2 vs 2 (NOUVEAU)
+            # =========================================================
+            elif mode == "2v2":
+                # On liste les 4 IDs concernés
+                ids = [
+                    match["winner_id"],
+                    match["winner2_id"],
+                    match["loser_id"],
+                    match["loser2_id"],
+                ]
+
+                # On récupère les 4 profils en une seule requête
+                profiles_res = (
+                    self.supabase.table("profiles").select("*").in_("id", ids).execute()
+                )
+                # On crée un dictionnaire pour accéder aux infos facilement par ID
+                p_map = {p["id"]: p for p in profiles_res.data}
+
+                # Calcul de la MOYENNE Elo des équipes (sur le classement 2v2)
+                # Note: On utilise .get(..., 1000) par sécurité si un champ est vide
+                w1_elo = p_map[match["winner_id"]].get("elo_2v2", 1000)
+                w2_elo = p_map[match["winner2_id"]].get("elo_2v2", 1000)
+                l1_elo = p_map[match["loser_id"]].get("elo_2v2", 1000)
+                l2_elo = p_map[match["loser2_id"]].get("elo_2v2", 1000)
+
+                team_win_avg = (w1_elo + w2_elo) / 2
+                team_lose_avg = (l1_elo + l2_elo) / 2
+
+                # Calcul du Delta basé sur les moyennes
+                # (On passe 0, 0 pour les matchs car on ne pondère pas par l'expérience en équipe pour l'instant)
+                _, _, delta = engine.compute_new_ratings(
+                    team_win_avg, team_lose_avg, 0, 0
+                )
+
+                # Mise à jour des 2 GAGNANTS (Colonne 2v2)
+                for wid in [match["winner_id"], match["winner2_id"]]:
+                    curr = p_map[wid]
+                    self.supabase.table("profiles").update(
+                        {
+                            "elo_2v2": curr.get("elo_2v2", 1000) + delta,
+                            "matches_2v2": curr.get("matches_2v2", 0) + 1,
+                        }
+                    ).eq("id", wid).execute()
+
+                # Mise à jour des 2 PERDANTS (Colonne 2v2)
+                for lid in [match["loser_id"], match["loser2_id"]]:
+                    curr = p_map[lid]
+                    self.supabase.table("profiles").update(
+                        {
+                            "elo_2v2": curr.get("elo_2v2", 1000) - delta,
+                            "matches_2v2": curr.get("matches_2v2", 0) + 1,
+                        }
+                    ).eq("id", lid).execute()
+
+            # =========================================================
+            # VALIDATION FINALE (COMMUN AUX DEUX MODES)
+            # =========================================================
             self.supabase.table("matches").update(
                 {"status": "validated", "elo_gain": delta}
             ).eq("id", match_id).execute()
