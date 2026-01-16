@@ -222,6 +222,7 @@ menu_options = [
     "🎯 Déclarer un match",
     "🆚 Historique des Parties",
     "📑 Mes validations",
+    "📢 Nouveautés",
     "📜 Règlement",
     "⚙️ Paramètres",
 ]
@@ -892,6 +893,38 @@ elif page == "📑 Mes validations":
                     if st.button("C'est une erreur ❌", key=f"ref_{m['id']}"):
                         db.reject_match(m["id"])
                         st.rerun()
+
+elif page == "📢 Nouveautés":
+    st.header("📢 Nouveautés & Mises à jour")
+    
+    # --- MISE A JOUR V2.0 ---
+    with st.container(border=True):
+        st.subheader("🚀 Mise à jour v2.0 : L'ère du Duo et de la Confidentialité")
+        st.caption("Déployée le 16 Janvier 2026")
+        
+        st.markdown(
+            """
+            Chers joueurs, une mise à jour majeure vient d'être déployée ! Voici ce qui change :
+
+            ### 👥 1. Arrivée du Mode Duo (2v2)
+            * **Déclarer des matchs en 2v2 :** Sélectionnez votre partenaire et vos deux adversaires.
+            * **Classement dédié :** Un Elo spécifique au 2v2 a été créé. Vos performances en équipe n'impactent pas votre classement Solo.
+            * **Filtres :** Basculez facilement entre "Solo" et "Duo" sur les classements et profils.
+
+            ### 🔒 2. Confidentialité & Vie Privée
+            Un nouvel onglet **"⚙️ Paramètres"** est disponible :
+            * **Mode Fantôme :** Masquez votre nom dans le classement général.
+            * **Profil Privé :** Bloquez l'accès à vos statistiques détaillées pour les autres joueurs.
+
+            ### 📊 3. Refonte des Profils
+            * **Nouvelle barre latérale :** Vos rangs et Elos (Solo ET Duo) sont visibles en permanence.
+            * **Statistiques détaillées :** Visualisez votre % de victoire, nombre de défaites et total de matchs.
+            * **Précision :** L'historique affiche maintenant l'heure exacte des matchs.
+
+            ---
+            *Bonne chance à tous sur le tapis vert !* 🎱
+            """
+        )
 
 elif page == "📜 Règlement":
     st.header("📜 Règlement Officiel")
