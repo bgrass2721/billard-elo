@@ -962,7 +962,7 @@ elif page == "📜 Règlement":
 elif page == "🔧 Panel Admin":
     st.header("🔧 Outils d'administration")
 
-    # --- GESTION DES MATCHS (Inchangé) ---
+    # --- GESTION DES MATCHS (Code inchangé) ---
     all_matches = db.get_all_matches().data
     status_filter = st.multiselect(
         "Statuts :",
@@ -1004,7 +1004,7 @@ elif page == "🔧 Panel Admin":
 
     st.divider()
 
-    # --- SAUVEGARDE (Inchangé) ---
+    # --- SAUVEGARDE (Code inchangé) ---
     st.subheader("💾 Sauvegarde de sécurité")
     if st.button("Préparer les fichiers de sauvegarde"):
         profiles = db.supabase.table("profiles").select("*").execute().data
@@ -1028,11 +1028,13 @@ elif page == "🔧 Panel Admin":
 
     st.divider()
 
-    # --- SYNCHRONISATION (VERSION CORRIGÉE 1v1 + 2v2) ---
-    st.subheader("🔄 Synchronisation des Scores")
-    st.info("Recalcule l'intégralité des scores (Solo et Duo) depuis le début.")
+    # --- SYNCHRONISATION TOTALE (CORRIGÉE & AMÉLIORÉE) ---
+    st.subheader("🔄 Synchronisation Totale")
+    st.info(
+        "Recalcule les scores et met à jour l'historique des gains (corrige les écarts Profil vs Classement)."
+    )
 
-    if st.button("Recalculer tous les Elo (Reset & Replay) ⚠️"):
+    if st.button("Lancer la réparation (Reset & Replay) ⚠️"):
         status_text = st.empty()
         status_text.text("⏳ Démarrage du recalcul...")
         progress_bar = st.progress(0)
@@ -1050,7 +1052,7 @@ elif page == "🔧 Panel Admin":
         # 2. On récupère tous les joueurs
         players = db.get_leaderboard().data
 
-        # 3. ON SÉPARE LES COMPTEURS (C'est ici la différence !)
+        # 3. On remet les compteurs à zéro (1v1 et 2v2 séparés)
         temp_elo_1v1 = {p["id"]: 1000 for p in players}
         matches_1v1 = {p["id"]: 0 for p in players}
 
@@ -1060,16 +1062,19 @@ elif page == "🔧 Panel Admin":
         engine = EloEngine()
         total_matches = len(matches)
 
-        # 4. On rejoue l'histoire match par match
+        # Compteur pour savoir combien de matchs ont été corrigés
+        corrected_matches = 0
+
+        # 4. On rejoue l'histoire
         for i, m in enumerate(matches):
             mode = m.get("mode", "1v1")
+            delta = 0  # Variable pour stocker le gain calculé
 
             # --- LOGIQUE 1v1 ---
             if mode == "1v1":
                 w_id, l_id = m["winner_id"], m["loser_id"]
-                # Sécurité si un joueur a été supprimé
                 if w_id in temp_elo_1v1 and l_id in temp_elo_1v1:
-                    new_w, new_l, _ = engine.compute_new_ratings(
+                    new_w, new_l, delta = engine.compute_new_ratings(
                         temp_elo_1v1[w_id], temp_elo_1v1[l_id], 0, 0
                     )
                     temp_elo_1v1[w_id] = new_w
@@ -1080,49 +1085,47 @@ elif page == "🔧 Panel Admin":
             # --- LOGIQUE 2v2 ---
             elif mode == "2v2":
                 ids = [m["winner_id"], m["winner2_id"], m["loser_id"], m["loser2_id"]]
-
-                # On vérifie que les 4 joueurs existent encore
                 if all(pid in temp_elo_2v2 for pid in ids if pid):
-                    # Moyenne équipe gagnante
                     w_avg = (
                         temp_elo_2v2[m["winner_id"]] + temp_elo_2v2[m["winner2_id"]]
                     ) / 2
-                    # Moyenne équipe perdante
                     l_avg = (
                         temp_elo_2v2[m["loser_id"]] + temp_elo_2v2[m["loser2_id"]]
                     ) / 2
 
-                    # Calcul du delta
                     _, _, delta = engine.compute_new_ratings(w_avg, l_avg, 0, 0)
 
-                    # Application aux gagnants
                     for pid in [m["winner_id"], m["winner2_id"]]:
                         temp_elo_2v2[pid] += delta
                         matches_2v2[pid] += 1
-
-                    # Application aux perdants
                     for pid in [m["loser_id"], m["loser2_id"]]:
                         temp_elo_2v2[pid] -= delta
                         matches_2v2[pid] += 1
+
+            # --- CORRECTION DE L'HISTORIQUE ---
+            # Si le gain calculé maintenant est différent de celui stocké, on met à jour la DB
+            # (On compare avec une petite marge d'erreur pour les flottants)
+            stored_gain = m.get("elo_gain", 0)
+            if abs(stored_gain - delta) > 0.01:
+                db.supabase.table("matches").update({"elo_gain": delta}).eq(
+                    "id", m["id"]
+                ).execute()
+                corrected_matches += 1
 
             # Barre de progression
             if total_matches > 0:
                 progress_bar.progress((i + 1) / total_matches)
 
-        status_text.text("💾 Sauvegarde des nouveaux scores dans la base...")
+        status_text.text("💾 Sauvegarde des scores finaux...")
 
-        # 5. On met à jour la base de données (Profils)
-        # On consolide tous les IDs
+        # 5. On met à jour les profils des joueurs
         all_ids = set(temp_elo_1v1.keys()) | set(temp_elo_2v2.keys())
 
         for p_id in all_ids:
             updates = {}
-            # Mise à jour 1v1
             if p_id in temp_elo_1v1:
                 updates["elo_rating"] = temp_elo_1v1[p_id]
                 updates["matches_played"] = matches_1v1[p_id]
-
-            # Mise à jour 2v2
             if p_id in temp_elo_2v2:
                 updates["elo_2v2"] = temp_elo_2v2[p_id]
                 updates["matches_2v2"] = matches_2v2[p_id]
@@ -1131,8 +1134,8 @@ elif page == "🔧 Panel Admin":
                 db.supabase.table("profiles").update(updates).eq("id", p_id).execute()
 
         progress_bar.empty()
-        status_text.success(
-            "✅ Synchronisation terminée ! Les classements Solo et Duo sont à jour."
+        st.success(
+            f"✅ Synchronisation terminée ! {corrected_matches} matchs ont vu leur valeur corrigée."
         )
         st.balloons()
 
