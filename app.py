@@ -18,12 +18,12 @@ st.set_page_config(
 
 def get_badges_html(player, matches_history):
     """
-    Génère les badges avec progression visible (Barre de progression textuelle dans l'infobulle).
+    Génère les badges avec progression visible et infobulles compatibles mobile.
+    Version compactée sans retours à la ligne pour éviter les bugs d'affichage.
     """
 
     # --- 1. CALCUL DES STATS ---
     total_matches = player.get("matches_played", 0) + player.get("matches_2v2", 0)
-
     wins = 0
     current_streak = 0
     unique_opponents = set()
@@ -46,7 +46,6 @@ def get_badges_html(player, matches_history):
         is_2v2 = m.get("mode") == "2v2"
         is_win = m["winner_id"] == player["id"] or m.get("winner2_id") == player["id"]
 
-        # Stats Partenaires
         if is_2v2:
             partner_id = None
             if m["winner_id"] == player["id"]:
@@ -60,7 +59,6 @@ def get_badges_html(player, matches_history):
             if partner_id:
                 partners_counter[partner_id] = partners_counter.get(partner_id, 0) + 1
 
-        # Stats Victoires / Adversaires
         if is_win:
             wins += 1
             if streak_active:
@@ -80,22 +78,17 @@ def get_badges_html(player, matches_history):
                 if oid:
                     unique_opponents.add(oid)
 
-    # Calculs finaux pour les progrès
     max_daily_matches = max(matches_by_day.values()) if matches_by_day else 0
     nb_unique = len(unique_opponents)
     max_duo_matches = max(partners_counter.values()) if partners_counter else 0
-
-    # Condition Marathon
     has_marathon = max_daily_matches >= 10
 
-    # --- 2. FONCTION GÉNÉRATRICE AVEC PROGRESSION ---
+    # --- 2. GÉNÉRATEUR DE HTML ---
     html_parts = []
 
     def process_tier_badge(current_val, tiers, shape, base_icon, label):
         achieved_tier = None
         next_tier = None
-
-        # Trouver le niveau actuel
         for tier in tiers:
             if current_val >= tier["req"]:
                 achieved_tier = tier
@@ -103,24 +96,18 @@ def get_badges_html(player, matches_history):
                 next_tier = tier
                 break
 
-        # Construction du texte de progression (ex: "Actuel : 7 adversaires")
         progress_text = f"<span style='color: #4db8ff; font-weight:bold;'>📊 Actuel : {current_val}</span>"
 
         if achieved_tier:
             style = achieved_tier["style"]
             name = achieved_tier["name"]
-
             if next_tier:
-                # Débloqué mais il y a une suite
                 tooltip_text = f"✅ {name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Prochain : {next_tier['name']} ({next_tier['req']} {label})</span>"
             else:
-                # Niveau Max atteint
                 tooltip_text = f"🏆 NIVEAU MAX<br>{name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>Vous êtes une légende !</span>"
-
             css_class = ""
             icon = base_icon
         else:
-            # Pas encore de badge
             first_tier = tiers[0]
             style = first_tier["style"]
             name = first_tier["name"]
@@ -128,19 +115,25 @@ def get_badges_html(player, matches_history):
             css_class = "locked"
             icon = base_icon
 
-        html_parts.append(
-            f"""
-            <div class="badge-item {css_class}">
-                <div class="badge-icon-box {shape} {style}">{icon}</div>
-                <div class="badge-name">{name}</div>
-                <span class="tooltip-content">{tooltip_text}</span>
-            </div>
-            """
+        badge_html = f'<div class="badge-item {css_class}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div><span class="tooltip-content">{tooltip_text}</span></div>'
+        html_parts.append(badge_html)
+
+    def add_special(cond, shape, style, icon, name, desc, current_stat=""):
+        css = "" if cond else "locked"
+        stat_line = (
+            f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>"
+            if current_stat
+            else ""
         )
+        if cond:
+            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
+        else:
+            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
 
-    # --- 3. APPELS DES FAMILLES ---
+        badge_html = f'<div class="badge-item {css}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div><span class="tooltip-content">{tooltip_text}</span></div>'
+        html_parts.append(badge_html)
 
-    # A. Matchs joués
+    # --- 3. DÉFINITION DES PALIERS ---
     tiers_fidelity = [
         {"req": 10, "style": "bronze", "name": "Rookie"},
         {"req": 50, "style": "silver", "name": "Confirmé"},
@@ -149,7 +142,6 @@ def get_badges_html(player, matches_history):
     ]
     process_tier_badge(total_matches, tiers_fidelity, "shield", "⚔️", "matchs")
 
-    # B. Victoires
     tiers_victory = [
         {"req": 10, "style": "bronze", "name": "Gâchette"},
         {"req": 25, "style": "silver", "name": "Conquérant"},
@@ -158,7 +150,6 @@ def get_badges_html(player, matches_history):
     ]
     process_tier_badge(wins, tiers_victory, "star", "🏆", "victoires")
 
-    # C. Duo (Même partenaire)
     tiers_duo = [
         {"req": 10, "style": "bronze", "name": "Binôme"},
         {"req": 30, "style": "silver", "name": "Frères d'armes"},
@@ -167,7 +158,6 @@ def get_badges_html(player, matches_history):
     ]
     process_tier_badge(max_duo_matches, tiers_duo, "circle", "🤝", "matchs ensemble")
 
-    # D. Adversaires Uniques
     tiers_social = [
         {"req": 5, "style": "bronze", "name": "Explorateur"},
         {"req": 10, "style": "silver", "name": "Voyageur"},
@@ -176,32 +166,6 @@ def get_badges_html(player, matches_history):
     ]
     process_tier_badge(nb_unique, tiers_social, "circle", "🌍", "adversaires")
 
-    # --- 4. SPÉCIAUX (Avec progression personnalisée) ---
-    def add_special(cond, shape, style, icon, name, desc, current_stat=""):
-        css = "" if cond else "locked"
-        # On ajoute la ligne de stat si elle est fournie
-        stat_line = (
-            f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>"
-            if current_stat
-            else ""
-        )
-
-        if cond:
-            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
-        else:
-            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
-
-        html_parts.append(
-            f"""
-            <div class="badge-item {css}">
-                <div class="badge-icon-box {shape} {style}">{icon}</div>
-                <div class="badge-name">{name}</div>
-                <span class="tooltip-content">{tooltip_text}</span>
-            </div>
-            """
-        )
-
-    # On Fire : On montre la série actuelle
     add_special(
         current_streak >= 5,
         "hexagon",
@@ -209,10 +173,8 @@ def get_badges_html(player, matches_history):
         "🔥",
         "On Fire",
         "Série de 5 victoires",
-        f"Série actuelle : {current_streak}",
+        f"Série : {current_streak}",
     )
-
-    # Marathon : On montre le record perso sur une journée
     add_special(
         has_marathon,
         "hexagon",
@@ -222,9 +184,6 @@ def get_badges_html(player, matches_history):
         "10 matchs en 1 jour",
         f"Record jour : {max_daily_matches}",
     )
-
-    # Giant Slayer : Pas de compteur progressif pertinent, juste Oui/Non
-    giant_text = "Accompli !" if has_giant_kill else "Pas encore..."
     add_special(
         has_giant_kill,
         "hexagon",
@@ -232,10 +191,11 @@ def get_badges_html(player, matches_history):
         "🩸",
         "Tueur",
         "Battre un +200 Elo",
-        giant_text,
+        "Accompli !" if has_giant_kill else "Pas encore...",
     )
 
-    return f"""<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);">{''.join(html_parts)}</div>"""
+    container_style = "display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
+    return f'<div style="{container_style}">{"".join(html_parts)}</div>'
 
 
 # 2. Initialisation du manager et du CookieManager
