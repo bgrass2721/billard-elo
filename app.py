@@ -15,6 +15,208 @@ st.set_page_config(
     layout="centered",
 )
 
+
+def get_badges_html(player, matches_history):
+    """
+    Génère les badges avec infobulles descriptives (ex: 'Confirmé : 50 matchs joués').
+    """
+
+    # --- 1. CALCUL DES STATS ---
+    total_matches = player.get("matches_played", 0) + player.get("matches_2v2", 0)
+
+    wins = 0
+    current_streak = 0
+    unique_opponents = set()
+    matches_by_day = {}
+
+    # Pour le calcul Duo spécifique
+    partners_counter = {}
+
+    has_giant_kill = False
+    streak_active = True
+
+    sorted_matches = sorted(
+        matches_history, key=lambda x: str(x["created_at"]), reverse=True
+    )
+
+    for m in sorted_matches:
+        day = str(m["created_at"]).split("T")[0]
+        if day not in matches_by_day:
+            matches_by_day[day] = 0
+        matches_by_day[day] += 1
+
+        is_2v2 = m.get("mode") == "2v2"
+
+        # Identification du résultat
+        is_win = m["winner_id"] == player["id"] or m.get("winner2_id") == player["id"]
+
+        # --- LOGIQUE DUO (Partenaire unique) ---
+        if is_2v2:
+            partner_id = None
+            if m["winner_id"] == player["id"]:
+                partner_id = m.get("winner2_id")
+            elif m.get("winner2_id") == player["id"]:
+                partner_id = m["winner_id"]
+            elif m["loser_id"] == player["id"]:
+                partner_id = m.get("loser2_id")
+            elif m.get("loser2_id") == player["id"]:
+                partner_id = m["loser_id"]
+
+            if partner_id:
+                partners_counter[partner_id] = partners_counter.get(partner_id, 0) + 1
+
+        # --- LOGIQUE VICTOIRE / GLOBE TROTTER ---
+        if is_win:
+            wins += 1
+            if streak_active:
+                current_streak += 1
+            if m.get("elo_gain", 0) >= 30:
+                has_giant_kill = True
+
+            opp_ids = [m["loser_id"], m.get("loser2_id")] if is_2v2 else [m["loser_id"]]
+            for oid in opp_ids:
+                if oid:
+                    unique_opponents.add(oid)
+        else:
+            streak_active = False
+            opp_ids = (
+                [m["winner_id"], m.get("winner2_id")] if is_2v2 else [m["winner_id"]]
+            )
+            for oid in opp_ids:
+                if oid:
+                    unique_opponents.add(oid)
+
+    has_marathon = any(count >= 10 for count in matches_by_day.values())
+    nb_unique = len(unique_opponents)
+
+    max_duo_matches = max(partners_counter.values()) if partners_counter else 0
+
+    # --- 2. FONCTION DE GESTION DES PALIERS ---
+    html_parts = []
+
+    def process_tier_badge(current_val, tiers, shape, base_icon, label):
+        """
+        Gère l'affichage progressif avec infobulle personnalisée.
+        """
+        achieved_tier = None
+        next_tier = None
+
+        # On cherche le rang actuel
+        for tier in tiers:
+            if current_val >= tier["req"]:
+                achieved_tier = tier
+            else:
+                next_tier = tier
+                break
+
+        if achieved_tier:
+            style = achieved_tier["style"]
+            name = achieved_tier["name"]
+
+            # --- MODIFICATION ICI ---
+            # On construit la description de ce qu'est le badge actuel
+            current_desc = f"{achieved_tier['req']} {label}"
+
+            if next_tier:
+                # Format : "Confirmé : 50 matchs joués. Prochain : Pilier (100 matchs joués)"
+                tooltip = f"✅ {name} : {current_desc}. Prochain : {next_tier['name']} ({next_tier['req']} {label})"
+            else:
+                tooltip = f"🏆 NIVEAU MAX : {name} ({current_desc})"
+
+            css_class = ""
+            icon = base_icon
+
+        else:
+            # Aucun badge
+            first_tier = tiers[0]
+            style = first_tier["style"]
+            name = first_tier["name"]
+            tooltip = f"🔒 BLOQUÉ : Il faut {first_tier['req']} {label} pour débloquer"
+            css_class = "locked"
+            icon = base_icon
+
+        html_parts.append(
+            f"""<div class="badge-item {css_class}" title="{tooltip}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div></div>"""
+        )
+
+    # --- 3. DÉFINITION DES FAMILLES ---
+
+    # A. FIDÉLITÉ (Shields)
+    tiers_fidelity = [
+        {"req": 10, "style": "bronze", "name": "Rookie"},
+        {"req": 50, "style": "silver", "name": "Confirmé"},
+        {"req": 100, "style": "gold", "name": "Pilier"},
+        {"req": 200, "style": "platinum", "name": "Légende"},
+    ]
+    process_tier_badge(total_matches, tiers_fidelity, "shield", "⚔️", "matchs joués")
+
+    # B. VICTOIRES (Stars)
+    tiers_victory = [
+        {"req": 10, "style": "bronze", "name": "Gâchette"},
+        {"req": 25, "style": "silver", "name": "Conquérant"},
+        {"req": 50, "style": "gold", "name": "Champion"},
+        {"req": 100, "style": "platinum", "name": "Invincible"},
+    ]
+    process_tier_badge(wins, tiers_victory, "star", "🏆", "victoires")
+
+    # C. DUO (Circles)
+    tiers_duo = [
+        {"req": 10, "style": "bronze", "name": "Binôme"},
+        {"req": 30, "style": "silver", "name": "Frères d'armes"},
+        {"req": 60, "style": "gold", "name": "Fusion"},
+        {"req": 120, "style": "platinum", "name": "Symbiose"},
+    ]
+    process_tier_badge(
+        max_duo_matches, tiers_duo, "circle", "🤝", "matchs avec le même partenaire"
+    )
+
+    # D. SOCIAL (Circles)
+    tiers_social = [
+        {"req": 5, "style": "bronze", "name": "Explorateur"},
+        {"req": 10, "style": "silver", "name": "Voyageur"},
+        {"req": 20, "style": "gold", "name": "Monde"},
+        {"req": 40, "style": "platinum", "name": "Universel"},
+    ]
+    process_tier_badge(nb_unique, tiers_social, "circle", "🌍", "adversaires uniques")
+
+    # --- 4. BADGES SPÉCIAUX ---
+
+    def add_special(cond, shape, style, icon, name, desc):
+        css = "" if cond else "locked"
+        tooltip = f"✅ {desc}" if cond else f"🔒 BLOQUÉ : {desc}"
+        html_parts.append(
+            f"""<div class="badge-item {css}" title="{tooltip}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div></div>"""
+        )
+
+    # On Fire (Série de 5)
+    add_special(
+        current_streak >= 5,
+        "hexagon",
+        "magma",
+        "🔥",
+        "On Fire",
+        "Série active de 5 victoires",
+    )
+
+    # Marathon (10 matchs/jour)
+    add_special(
+        has_marathon,
+        "hexagon",
+        "electric",
+        "⚡",
+        "Marathon",
+        "Jouer 10 matchs en 1 jour",
+    )
+
+    # Giant Slayer (+200 Elo)
+    add_special(
+        has_giant_kill, "hexagon", "blood", "🩸", "Tueur", "Battre un joueur +200 Elo"
+    )
+
+    # --- 5. RENDU ---
+    return f"""<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);">{''.join(html_parts)}</div>"""
+
+
 # 2. Initialisation du manager et du CookieManager
 db = DBManager()
 cookie_manager = stx.CookieManager()
@@ -30,6 +232,117 @@ st.markdown(
     .main { background-color: #0e1117; }
     stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #2ecc71; color: white; }
     .stDataFrame { background-color: #1f2937; border-radius: 10px; }
+    /* --- 1. CONTENEUR GLOBAL --- */
+    .badge-item {
+        display: flex; flex-direction: column; align-items: center;
+        width: 85px; margin: 12px;
+        position: relative;
+        cursor: help;
+    }
+
+    /* Texte sous le badge */
+    .badge-name {
+        font-size: 11px; font-weight: 800; text-align: center; color: #ccc; margin-top: 8px;
+        text-transform: uppercase; letter-spacing: 0.5px; text-shadow: 1px 1px 2px black;
+    }
+
+    /* --- 2. LE BADGE (Lumière et Ombres) --- */
+    .badge-icon-box {
+        position: relative;
+        width: 60px; height: 60px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 24px;
+        color: white;
+        background: transparent; /* Fond transparent pour laisser passer la lueur */
+        z-index: 1;
+        
+        /* LUEUR DE CONTOUR (Rim Light) + OMBRE PORTÉE */
+        /* Maintenant que le parent n'est plus coupé, ceci s'affiche parfaitement sur fond noir */
+        filter: 
+            drop-shadow(0 0 3px rgba(255, 255, 255, 0.6)) 
+            drop-shadow(0 5px 10px rgba(0,0,0,0.8));
+    }
+
+    /* --- 3. DÉFINITION DES FORMES (Via Variables CSS) --- */
+    /* On stocke la forme dans --shape sans couper le parent */
+    .shield { --shape: polygon(50% 0, 100% 15%, 100% 75%, 50% 100%, 0 75%, 0 15%); }
+    /* Ta forme étoile "Dodue" conservée */
+    .star { --shape: polygon(50% 0%, 63% 38%, 100% 38%, 69% 59%, 82% 100%, 50% 75%, 18% 100%, 31% 59%, 0% 38%, 37% 38%); }
+    .hexagon { --shape: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+
+    /* Le cercle est un cas spécial géré par border-radius */
+    .circle { --shape: none; border-radius: 50%; }
+
+
+    /* --- 4. COUCHES INTÉRIEURES (Ce sont elles qu'on découpe) --- */
+
+    /* COUCHE DU FOND : LA BORDURE NOIRE (Niveau -2) */
+    .badge-icon-box::before {
+        content: ""; position: absolute;
+        inset: 0;
+        background: #111;
+        z-index: -2;
+        
+        /* On applique la découpe ICI seulement */
+        clip-path: var(--shape);
+        border-radius: inherit; /* Pour le cercle */
+    }
+
+    /* COUCHE DU MILIEU : LA COULEUR/MATIÈRE (Niveau -1) */
+    .badge-icon-box::after {
+        content: ""; position: absolute;
+        inset: 3px; /* Épaisseur standard */
+        z-index: -1;
+        
+        /* On applique la découpe ICI aussi */
+        clip-path: var(--shape);
+        border-radius: inherit;
+        
+        /* Ombre interne */
+        box-shadow: inset 0 2px 5px rgba(255,255,255,0.4), inset 0 -4px 8px rgba(0,0,0,0.4);
+    }
+
+
+    /* --- 5. COULEURS (Inchangé) --- */
+    .bronze::after { background: linear-gradient(135deg, #e7a566, #8b4513); }
+    .silver::after { background: linear-gradient(135deg, #ffffff, #999); }
+    .silver { color: #222; text-shadow: none; }
+    .gold::after { background: linear-gradient(135deg, #fff5c3, #ffbf00, #c78400); }
+    .platinum::after { background: linear-gradient(135deg, #ffffff, #dbeafe, #60a5fa); }
+    .platinum { color: #0f172a; text-shadow: none; }
+
+    .magma::after    { background: linear-gradient(135deg, #ffdd00, #ff4800, #910a0a); }
+    .blood::after    { background: linear-gradient(135deg, #ff5555, #aa0000, #300000); }
+    .electric::after { background: linear-gradient(135deg, #ffffa1, #ffc800, #ff7b00); }
+    .electric { color: #222; text-shadow: none; }
+    .ice::after      { background: linear-gradient(135deg, #e0f7fa, #00bcd4, #006064); }
+    .ice { color: #003c3f; text-shadow: none; }
+
+    /* --- 6. ÉTAT VERROUILLÉ --- */
+    .locked {
+        filter: grayscale(100%) opacity(0.5);
+        transform: scale(0.95);
+        transition: all 0.3s;
+    }
+    .locked .badge-icon-box::before { background: #333; }
+    .locked .badge-icon-box::after { background: #555; box-shadow: none; }
+    .locked:hover {
+        filter: grayscale(0%) opacity(1);
+        transform: scale(1.1);
+        z-index: 10;
+    }
+
+    /* --- 7. TES CORRECTIFS SPÉCIFIQUES --- */
+
+    /* Épaisseur bordure étoile (Tu avais mis 7px) */
+    .badge-icon-box.star::after {
+        inset: 7px; 
+    }
+    /* Taille police étoile (Tu avais mis 14px) */
+    .badge-icon-box.star {
+        font-size: 14px;
+        padding-top: 2px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -340,14 +653,37 @@ elif page == "👤 Profils Joueurs":
     target_user = players_map[selected_username]
 
     # --- SÉCURITÉ : BLOCAGE SI PROFIL PRIVÉ ---
-    # Si le profil est caché ET que ce n'est pas le mien -> ON BLOQUE TOUT
     if target_user.get("is_hidden_profile", False) and target_user["id"] != user["id"]:
         st.warning(f"🔒 Le profil de {target_user['username']} est privé.")
         st.info("L'utilisateur a choisi de masquer ses statistiques et son historique.")
-        st.stop()  # Arrête l'exécution ici, n'affiche rien d'autre
+        st.stop()
     # ------------------------------------------
 
     st.header(f"👤 Profil de {target_user['username']}")
+
+    # --- 1. BADGES (NOUVEAU) ---
+    # On doit récupérer TOUS les matchs validés (peu importe le mode) pour ce joueur
+    # pour calculer ses badges correctement (Marathon, Globe-Trotter...)
+    raw_matches = (
+        db.supabase.table("matches")
+        .select("*")
+        .eq("status", "validated")
+        .execute()
+        .data
+    )
+
+    user_full_history = [
+        m
+        for m in raw_matches
+        if m["winner_id"] == target_user["id"]
+        or m["loser_id"] == target_user["id"]
+        or m.get("winner2_id") == target_user["id"]
+        or m.get("loser2_id") == target_user["id"]
+    ]
+
+    # Affiche le HTML en l'interprétant graphiquement
+    st.markdown(get_badges_html(target_user, user_full_history), unsafe_allow_html=True)
+    # ---------------------------
 
     # --- 1. SÉLECTEUR DE MODE (1v1 / 2v2) ---
     view_mode = st.radio(
