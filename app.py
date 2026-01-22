@@ -962,27 +962,54 @@ elif page == "📜 Règlement":
 elif page == "🔧 Panel Admin":
     st.header("🔧 Outils d'administration")
 
-    # --- GESTION DES MATCHS (Code inchangé) ---
+    # --- 1. GESTION DES MATCHS ---
+    # On récupère les matchs avec les jointures (winner, loser, winner2, loser2)
     all_matches = db.get_all_matches().data
+
     status_filter = st.multiselect(
         "Statuts :",
         [
-            "pending",
-            "validated",
-            "rejected",
-            "disputed",
-            "revoked",
-            "rejected_confirmed",
+            "pending",  # En attente
+            "validated",  # Validé
+            "rejected",  # Refusé
+            "disputed",  # Litige
+            "revoked",  # Révoqué (annulé après validation)
+            "rejected_confirmed",  # Refus archivé
         ],
         default=["disputed", "pending"],
     )
+
     if all_matches:
         for m in all_matches:
             if m["status"] in status_filter:
-                with st.expander(
-                    f"Match {m['status'].upper()} - {m['winner']['username']} vs {m['loser']['username']}"
-                ):
+                # A. Récupération des infos de base
+                mode = m.get("mode", "1v1")
+                icon = "👥" if mode == "2v2" else "👤"
+                date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
+
+                # B. Récupération sécurisée des pseudos (Gestion des None)
+                # Note : m.get("winner") peut être None si la jointure a échoué, d'où le (Or {})
+                w1 = (m.get("winner") or {}).get("username", "Inconnu")
+                l1 = (m.get("loser") or {}).get("username", "Inconnu")
+
+                # C. Construction du titre selon le mode
+                if mode == "2v2":
+                    w2 = (m.get("winner2") or {}).get("username", "?")
+                    l2 = (m.get("loser2") or {}).get("username", "?")
+                    versus_str = f"{w1} & {w2} vs {l1} & {l2}"
+                else:
+                    versus_str = f"{w1} vs {l1}"
+
+                # D. Titre final de l'expander
+                match_label = (
+                    f"{icon} {mode} | {m['status'].upper()} | {date_str} | {versus_str}"
+                )
+
+                # E. Affichage et Actions
+                with st.expander(match_label):
                     c1, c2 = st.columns(2)
+
+                    # --- Actions pour "En attente" ---
                     if m["status"] == "pending":
                         if c1.button("Forcer Validation ✅", key=f"adm_val_{m['id']}"):
                             db.validate_match_logic(m["id"])
@@ -990,6 +1017,8 @@ elif page == "🔧 Panel Admin":
                         if c2.button("Supprimer 🗑️", key=f"adm_del_{m['id']}"):
                             db.reject_match(m["id"])
                             st.rerun()
+
+                    # --- Actions pour "Litige" ---
                     elif m["status"] == "disputed":
                         if c1.button("Forcer Validation ✅", key=f"f_v_{m['id']}"):
                             db.validate_match_logic(m["id"])
@@ -997,16 +1026,23 @@ elif page == "🔧 Panel Admin":
                         if c2.button("Confirmer Rejet ❌", key=f"f_r_{m['id']}"):
                             db.reject_match(m["id"])
                             st.rerun()
+
+                    # --- Actions pour "Validé" ---
                     elif m["status"] == "validated":
-                        if st.button("Révoquer le match ⚠️", key=f"rev_{m['id']}"):
+                        st.info(f"Gain enregistré : {m.get('elo_gain')} points")
+                        if st.button(
+                            "Révoquer le match (Annuler les points) ⚠️",
+                            key=f"rev_{m['id']}",
+                        ):
                             db.revoke_match(m["id"])
                             st.rerun()
 
     st.divider()
 
-    # --- SAUVEGARDE (Code inchangé) ---
+    # --- 2. SAUVEGARDE DE SÉCURITÉ ---
     st.subheader("💾 Sauvegarde de sécurité")
     if st.button("Préparer les fichiers de sauvegarde"):
+        # On télécharge les tables brutes
         profiles = db.supabase.table("profiles").select("*").execute().data
         df_prof = pd.DataFrame(profiles)
         matches = db.supabase.table("matches").select("*").execute().data
@@ -1028,10 +1064,11 @@ elif page == "🔧 Panel Admin":
 
     st.divider()
 
-    # --- SYNCHRONISATION TOTALE (CORRIGÉE & AMÉLIORÉE) ---
+    # --- 3. SYNCHRONISATION TOTALE (CORRIGÉE) ---
     st.subheader("🔄 Synchronisation Totale")
     st.info(
-        "Recalcule les scores et met à jour l'historique des gains (corrige les écarts Profil vs Classement)."
+        "Recalcule tous les scores depuis le début et met à jour l'historique des gains. "
+        "Utile pour corriger les écarts entre le profil et le classement."
     )
 
     if st.button("Lancer la réparation (Reset & Replay) ⚠️"):
@@ -1039,7 +1076,7 @@ elif page == "🔧 Panel Admin":
         status_text.text("⏳ Démarrage du recalcul...")
         progress_bar = st.progress(0)
 
-        # 1. On récupère TOUS les matchs validés
+        # A. Récupération Chronologique
         matches = (
             db.supabase.table("matches")
             .select("*")
@@ -1049,10 +1086,10 @@ elif page == "🔧 Panel Admin":
             .data
         )
 
-        # 2. On récupère tous les joueurs
+        # B. Initialisation des compteurs virtuels
         players = db.get_leaderboard().data
 
-        # 3. On remet les compteurs à zéro (1v1 et 2v2 séparés)
+        # On sépare 1v1 et 2v2
         temp_elo_1v1 = {p["id"]: 1000 for p in players}
         matches_1v1 = {p["id"]: 0 for p in players}
 
@@ -1061,16 +1098,14 @@ elif page == "🔧 Panel Admin":
 
         engine = EloEngine()
         total_matches = len(matches)
-
-        # Compteur pour savoir combien de matchs ont été corrigés
         corrected_matches = 0
 
-        # 4. On rejoue l'histoire
+        # C. Replay de l'histoire
         for i, m in enumerate(matches):
             mode = m.get("mode", "1v1")
-            delta = 0  # Variable pour stocker le gain calculé
+            delta = 0
 
-            # --- LOGIQUE 1v1 ---
+            # --- Logique 1v1 ---
             if mode == "1v1":
                 w_id, l_id = m["winner_id"], m["loser_id"]
                 if w_id in temp_elo_1v1 and l_id in temp_elo_1v1:
@@ -1082,9 +1117,10 @@ elif page == "🔧 Panel Admin":
                     matches_1v1[w_id] += 1
                     matches_1v1[l_id] += 1
 
-            # --- LOGIQUE 2v2 ---
+            # --- Logique 2v2 ---
             elif mode == "2v2":
                 ids = [m["winner_id"], m["winner2_id"], m["loser_id"], m["loser2_id"]]
+                # On vérifie que les 4 joueurs existent
                 if all(pid in temp_elo_2v2 for pid in ids if pid):
                     w_avg = (
                         temp_elo_2v2[m["winner_id"]] + temp_elo_2v2[m["winner2_id"]]
@@ -1102,23 +1138,21 @@ elif page == "🔧 Panel Admin":
                         temp_elo_2v2[pid] -= delta
                         matches_2v2[pid] += 1
 
-            # --- CORRECTION DE L'HISTORIQUE ---
-            # Si le gain calculé maintenant est différent de celui stocké, on met à jour la DB
-            # (On compare avec une petite marge d'erreur pour les flottants)
+            # D. Correction de l'historique (elo_gain)
             stored_gain = m.get("elo_gain", 0)
+            # Si le gain calculé diffère du gain stocké de plus de 0.01
             if abs(stored_gain - delta) > 0.01:
                 db.supabase.table("matches").update({"elo_gain": delta}).eq(
                     "id", m["id"]
                 ).execute()
                 corrected_matches += 1
 
-            # Barre de progression
             if total_matches > 0:
                 progress_bar.progress((i + 1) / total_matches)
 
         status_text.text("💾 Sauvegarde des scores finaux...")
 
-        # 5. On met à jour les profils des joueurs
+        # E. Mise à jour finale des profils
         all_ids = set(temp_elo_1v1.keys()) | set(temp_elo_2v2.keys())
 
         for p_id in all_ids:
@@ -1135,7 +1169,7 @@ elif page == "🔧 Panel Admin":
 
         progress_bar.empty()
         st.success(
-            f"✅ Synchronisation terminée ! {corrected_matches} matchs ont vu leur valeur corrigée."
+            f"✅ Synchronisation terminée ! {corrected_matches} matchs historiques corrigés."
         )
         st.balloons()
 

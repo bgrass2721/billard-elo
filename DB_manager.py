@@ -178,11 +178,12 @@ class DBManager:
             return False, f"Erreur : {e}"
 
     def get_all_matches(self):
-        """Récupère l'historique complet des matchs pour l'administrateur"""
+        """Récupère l'historique complet avec les noms des 4 joueurs potentiels"""
         return (
             self.supabase.table("matches")
             .select(
-                "*, winner:profiles!winner_id(username), loser:profiles!loser_id(username)"
+                # On utilise des alias (winner2:, loser2:) pour récupérer les pseudos supplémentaires
+                "*, winner:profiles!winner_id(username), loser:profiles!loser_id(username), winner2:profiles!winner2_id(username), loser2:profiles!loser2_id(username)"
             )
             .order("created_at", desc=True)
             .execute()
