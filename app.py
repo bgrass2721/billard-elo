@@ -1415,32 +1415,31 @@ elif page == "📑 Mes validations":
 elif page == "📢 Nouveautés":
     st.header("📢 Nouveautés & Mises à jour")
 
-    # --- MISE A JOUR V2.0 ---
+    # --- MISE A JOUR V2.1 ---
     with st.container(border=True):
-        st.subheader("🚀 Mise à jour v2.0 : L'ère du Duo et de la Confidentialité")
-        st.caption("Déployée le 16 Janvier 2026")
+        st.subheader("💎 Mise à jour v2.1 : Trophées & Rivalités")
+        st.caption("Déployée le 22 Janvier 2026")
 
         st.markdown(
             """
-            Chers joueurs, une mise à jour majeure vient d'être déployée ! Voici ce qui change :
+            L'application s'enrichit de deux fonctionnalités majeures pour pimenter la compétition !
 
-            ### 👥 1. Arrivée du Mode Duo (2v2)
-            * **Déclarer des matchs en 2v2 :** Sélectionnez votre partenaire et vos deux adversaires.
-            * **Classement dédié :** Un Elo spécifique au 2v2 a été créé. Vos performances en équipe n'impactent pas votre classement Solo.
-            * **Filtres :** Basculez facilement entre "Solo" et "Duo" sur les classements et profils.
+            ### 🏅 1. Arrivée des Badges & Trophées
+            Vos exploits sont désormais immortalisés ! Un système de succès inédit fait son apparition sur votre profil :
+            * **Collectionnez-les tous :** Des badges au design 3D (Or, Argent, Bronze) qui récompensent votre fidélité, vos victoires et votre style de jeu.
+            * **Objectif PLATINE 💎 :** Serez-vous assez assidu pour atteindre ce rang ultime (ex: 200 matchs ou 100 victoires) ?
+            * **Progression Interactive :** Cliquez sur un badge verrouillé (grisé) pour découvrir l'objectif précis à atteindre.
+            * **Spécial Duo :** Des trophées exclusifs pour récompenser la fidélité de votre binôme.
 
-            ### 🔒 2. Confidentialité & Vie Privée
-            Un nouvel onglet **"⚙️ Paramètres"** est disponible :
-            * **Mode Fantôme :** Masquez votre nom dans le classement général.
-            * **Profil Privé :** Bloquez l'accès à vos statistiques détaillées pour les autres joueurs.
-
-            ### 📊 3. Refonte des Profils
-            * **Nouvelle barre latérale :** Vos rangs et Elos (Solo ET Duo) sont visibles en permanence.
-            * **Statistiques détaillées :** Visualisez votre % de victoire, nombre de défaites et total de matchs.
-            * **Précision :** L'historique affiche maintenant l'heure exacte des matchs.
+            ### ⚔️ 2. Le Comparateur de Joueurs
+            Fini les débats, place aux chiffres. L'onglet **"Historique"** devient un puissant outil d'analyse :
+            * **Duel au Sommet :** Comparez n'importe quel joueur A contre n'importe quel joueur B.
+            * **Graphiques Avancés :** Analysez la domination via deux courbes : l'écart de Victoires (Forme) et l'écart de Points Elo (Niveau).
+            * **Titres & Statuts :** L'appli détermine automatiquement si vous êtes la "Bête Noire" de votre adversaire ou son "Sac de Frappe".
+            * **Analyse Synergie (2v2) :** Découvrez si votre duo est classé comme "Gorilles" (Invincibles) ou "Toxiques" (Incompatibles).
 
             ---
-            *Bonne chance à tous sur le tapis vert !* 🎱
+            *La chasse aux trophées est ouverte !* 🏆
             """
         )
 
