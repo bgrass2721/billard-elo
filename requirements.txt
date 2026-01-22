@@ -2,3 +2,5 @@ streamlit
 supabase
 pandas
 extra-streamlit-components
+pytz
+altair

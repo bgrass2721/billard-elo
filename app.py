@@ -4,6 +4,8 @@ import pandas as pd
 import extra_streamlit_components as stx
 from elo_engine import EloEngine
 import altair as alt
+from datetime import datetime
+import pytz
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
@@ -38,7 +40,14 @@ def get_badges_html(player, matches_history):
     )
 
     for m in sorted_matches:
-        day = str(m["created_at"]).split("T")[0]
+        # Conversion UTC -> Paris
+        dt_utc = pd.to_datetime(m["created_at"])
+        dt_paris = (
+            dt_utc.tz_convert("Europe/Paris")
+            if dt_utc.tzinfo
+            else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+        )
+        day = dt_paris.strftime("%Y-%m-%d")
         if day not in matches_by_day:
             matches_by_day[day] = 0
         matches_by_day[day] += 1
@@ -740,7 +749,13 @@ elif page == "👤 Profils Joueurs":
         if is_involved:
             match_counter += 1
             # Formatage Date et Heure
-            date_display = pd.to_datetime(m["created_at"]).strftime("%d/%m %Hh%M")
+            dt_utc = pd.to_datetime(m["created_at"])
+            dt_paris = (
+                dt_utc.tz_convert("Europe/Paris")
+                if dt_utc.tzinfo
+                else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+            )
+            date_display = dt_paris.strftime("%d/%m %Hh%M")
 
             # Est-ce une victoire ?
             is_win = (
@@ -841,7 +856,13 @@ elif page == "👤 Profils Joueurs":
             )
 
             res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-            date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
+            dt_utc = pd.to_datetime(m["created_at"])
+            dt_paris = (
+                dt_utc.tz_convert("Europe/Paris")
+                if dt_utc.tzinfo
+                else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+            )
+            date_str = dt_paris.strftime("%d/%m à %Hh%M")
             points = m.get("elo_gain", 0)
             sign = "+" if is_win else "-"
 
@@ -1060,7 +1081,6 @@ elif page == "🆚 Comparateur de joueurs":
 
     all_players = players_res.data
     players_map = {p["username"]: p for p in all_players}
-    # CRUCIAL : On crée un dictionnaire ID -> Nom pour l'affichage 2v2
     id_to_name = {p["id"]: p["username"] for p in all_players}
 
     player_names = list(players_map.keys())
@@ -1116,7 +1136,6 @@ elif page == "🆚 Comparateur de joueurs":
 
     # 5. ANALYSE
     duel_matches = []
-
     vs_stats = {
         "p1_wins": 0,
         "p2_wins": 0,
@@ -1126,7 +1145,6 @@ elif page == "🆚 Comparateur de joueurs":
     }
     coop_stats = {"wins": 0, "losses": 0, "total": 0}
 
-    # On initialise le graph avec le point 0
     graph_data = [
         {
             "Match": 0,
@@ -1135,11 +1153,22 @@ elif page == "🆚 Comparateur de joueurs":
             "Date": "Début",
         }
     ]
-
     cumulative_score_wins = 0
     cumulative_score_elo = 0
 
     for m in raw_matches:
+        # --- CORRECTION HEURE : Conversion UTC -> Paris ---
+        dt_utc = pd.to_datetime(m["created_at"])
+        # On localise en UTC puis on convertit en Europe/Paris pour gérer le décalage (+1h/+2h)
+        dt_paris = (
+            dt_utc.tz_convert("Europe/Paris")
+            if dt_utc.tzinfo
+            else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+        )
+
+        date_label = dt_paris.strftime("%d/%m")
+        date_tableau = dt_paris.strftime("%d/%m %Hh%M")
+
         # P1 et P2 sont-ils présents ?
         p1_is_present = (
             m["winner_id"] == id_1
@@ -1155,17 +1184,14 @@ elif page == "🆚 Comparateur de joueurs":
         )
 
         if p1_is_present and p2_is_present:
-
             p1_is_winner = m["winner_id"] == id_1 or m.get("winner2_id") == id_1
             p2_is_winner = m["winner_id"] == id_2 or m.get("winner2_id") == id_2
 
             is_coop = (p1_is_winner and p2_is_winner) or (
                 not p1_is_winner and not p2_is_winner
             )
-
             elo_gain = m.get("elo_gain", 0)
 
-            # --- CALCUL STATS ---
             if is_coop:
                 coop_stats["total"] += 1
                 if p1_is_winner:
@@ -1174,13 +1200,10 @@ elif page == "🆚 Comparateur de joueurs":
                     coop_stats["losses"] += 1
             else:
                 vs_stats["total"] += 1
-
                 if p1_is_winner:
                     vs_stats["p1_wins"] += 1
-                    # P1 gagne : il prend +1 victoire et +X points Elo
                     cumulative_score_wins += 1
                     cumulative_score_elo += elo_gain
-
                     if vs_stats["current_streak_winner"] == "p1":
                         vs_stats["streak_p1"] += 1
                     else:
@@ -1188,18 +1211,15 @@ elif page == "🆚 Comparateur de joueurs":
                         vs_stats["current_streak_winner"] = "p1"
                 else:
                     vs_stats["p2_wins"] += 1
-                    # P1 perd : il prend -1 victoire et -X points Elo
                     cumulative_score_wins -= 1
                     cumulative_score_elo -= elo_gain
-
                     if vs_stats["current_streak_winner"] == "p2":
                         vs_stats["streak_p1"] += 1
                     else:
                         vs_stats["streak_p1"] = 1
                         vs_stats["current_streak_winner"] = "p2"
 
-                # Graphique (Uniquement pour Duel)
-                date_label = pd.to_datetime(m["created_at"]).strftime("%d/%m")
+                # Graphique avec date corrigée
                 graph_data.append(
                     {
                         "Match": vs_stats["total"],
@@ -1218,12 +1238,11 @@ elif page == "🆚 Comparateur de joueurs":
             team_win = f"{w1} & {w2}" if w2 else w1
             team_lose = f"{l1} & {l2}" if l2 else l1
             match_str = f"{team_win}  ⚡  {team_lose}"
-
             points_display = f"{elo_gain:+}" if p1_is_winner else f"{-elo_gain:+}"
 
             duel_matches.append(
                 {
-                    "Date": pd.to_datetime(m["created_at"]).strftime("%d/%m %Hh%M"),
+                    "Date": date_tableau,  # Heure corrigée ici
                     "Type": "Partenaires" if is_coop else "Rivaux",
                     "Détails du Match": match_str,
                     "Résultat (P1)": "🏆 Victoire" if p1_is_winner else "💀 Défaite",
@@ -1238,9 +1257,7 @@ elif page == "🆚 Comparateur de joueurs":
     if vs_stats["total"] == 0:
         st.info("Aucun affrontement direct (l'un contre l'autre).")
     else:
-        # SCOREBOARD
         col_left, col_mid, col_right = st.columns([2, 3, 2])
-
         with col_left:
             st.markdown(
                 f"<h2 style='text-align: center; color: #4CAF50;'>{vs_stats['p1_wins']}</h2>",
@@ -1252,7 +1269,6 @@ elif page == "🆚 Comparateur de joueurs":
             )
 
         with col_mid:
-            # --- LOGIQUE DES TITRES ---
             p1_win_rate = vs_stats["p1_wins"] / vs_stats["total"]
             title_text = "⚔️ Duel Équilibré"
             title_color = "#ccc"
@@ -1292,15 +1308,9 @@ elif page == "🆚 Comparateur de joueurs":
             st.progress(p1_win_rate)
             st.caption(f"Taux de victoire de {p1_name} : {p1_win_rate*100:.0f}%")
 
-            # --- AJOUT DU BILAN ELO NET ---
             elo_color = "#4CAF50" if cumulative_score_elo >= 0 else "#FF5252"
             st.markdown(
-                f"""
-                <div style='text-align: center; margin-top: 15px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);'>
-                    <div style='font-size: 0.8em; opacity: 0.7; text-transform: uppercase;'>Bilan Elo Net ({p1_name})</div>
-                    <div style='font-size: 1.5em; font-weight: bold; color: {elo_color};'>{cumulative_score_elo:+} pts</div>
-                </div>
-                """,
+                f"<div style='text-align: center; margin-top: 15px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);'><div style='font-size: 0.8em; opacity: 0.7; text-transform: uppercase;'>Bilan Elo Net ({p1_name})</div><div style='font-size: 1.5em; font-weight: bold; color: {elo_color};'>{cumulative_score_elo:+} pts</div></div>",
                 unsafe_allow_html=True,
             )
 
@@ -1314,21 +1324,17 @@ elif page == "🆚 Comparateur de joueurs":
                 unsafe_allow_html=True,
             )
 
-        # --- GRAPHIQUES (ONGLETS) ---
         st.write("")
         st.markdown("##### 📈 Historique de la domination")
-
         tab_elo, tab_wins = st.tabs(
             ["📉 Écart Elo (Points)", "📊 Écart Victoires (Net)"]
         )
-
         df_graph = pd.DataFrame(graph_data)
 
-        # Graphique 1 : Écart ELO
         with tab_elo:
             chart_elo = (
                 alt.Chart(df_graph)
-                .mark_line(point=True)  # Ligne droite avec points
+                .mark_line(point=True)
                 .encode(
                     x=alt.X("Match", axis=alt.Axis(tickMinStep=1)),
                     y=alt.Y("Score Cumulé (Elo)", title=f"Avantage Points ({p1_name})"),
@@ -1337,22 +1343,17 @@ elif page == "🆚 Comparateur de joueurs":
                 )
                 .properties(height=300)
             )
-
             rule = (
                 alt.Chart(pd.DataFrame({"y": [0]}))
                 .mark_rule(color="white", opacity=0.3)
                 .encode(y="y")
             )
             st.altair_chart(chart_elo + rule, use_container_width=True)
-            st.caption(
-                "Ce graphique montre le cumul des points Elo gagnés/perdus l'un contre l'autre."
-            )
 
-        # Graphique 2 : Écart VICTOIRES
         with tab_wins:
             chart_wins = (
                 alt.Chart(df_graph)
-                .mark_line(point=True)  # Ligne droite avec points
+                .mark_line(point=True)
                 .encode(
                     x=alt.X("Match", axis=alt.Axis(tickMinStep=1)),
                     y=alt.Y(
@@ -1364,52 +1365,38 @@ elif page == "🆚 Comparateur de joueurs":
                 )
                 .properties(height=300)
             )
-
             st.altair_chart(chart_wins + rule, use_container_width=True)
-            st.caption(
-                "Ce graphique montre la différence de victoires (Forme du moment)."
-            )
 
     # 7. AFFICHAGE COOP (PARTENAIRES - 2v2)
     if target_db_mode == "2v2":
         st.divider()
         st.subheader(f"🧬 Synergie : {p1_name} & {p2_name}")
-
         if coop_stats["total"] == 0:
             st.write("Ils n'ont jamais joué ensemble dans la même équipe.")
         else:
             wr_coop = coop_stats["wins"] / coop_stats["total"]
-
-            # Titres Coop
-            coop_title = "🤝 Binôme Standard"
-            emoji_coop = "😐"
-
+            coop_title, emoji_coop = "🤝 Binôme Standard", "😐"
             if coop_stats["total"] >= 5:
                 if wr_coop >= 0.75:
-                    coop_title = "🦍 LES GORILLES (Invincibles)"
-                    emoji_coop = "🔥"
+                    coop_title, emoji_coop = "🦍 LES GORILLES (Invincibles)", "🔥"
                 elif wr_coop >= 0.55:
-                    coop_title = "⚔️ FRÈRES D'ARMES"
-                    emoji_coop = "💪"
+                    coop_title, emoji_coop = "⚔️ FRÈRES D'ARMES", "💪"
                 elif wr_coop <= 0.35:
-                    coop_title = "💔 LES TOXIQUES (Incompatibles)"
-                    emoji_coop = "💀"
+                    coop_title, emoji_coop = "💔 LES TOXIQUES (Incompatibles)", "💀"
                 else:
-                    coop_title = "⚖️ PILE OU FACE"
-                    emoji_coop = "🪙"
+                    coop_title, emoji_coop = "⚖️ PILE OU FACE", "🪙"
 
             k1, k2, k3 = st.columns(3)
             k1.metric("Matchs Ensemble", coop_stats["total"])
             k2.metric("Victoires", coop_stats["wins"], f"{wr_coop*100:.0f}%")
             k3.metric("Statut", emoji_coop, coop_title)
 
-    # 8. TABLEAU GLOBAL (Commun aux deux analyses)
+    # 8. TABLEAU GLOBAL
     st.divider()
     with st.expander("📜 Voir l'historique complet des rencontres", expanded=True):
         if not duel_matches:
             st.write("Aucun match trouvé.")
         else:
-            # On affiche du plus récent au plus ancien
             st.dataframe(
                 pd.DataFrame(duel_matches[::-1]),
                 use_container_width=True,
@@ -1530,7 +1517,13 @@ elif page == "🔧 Panel Admin":
                 # A. Récupération des infos de base
                 mode = m.get("mode", "1v1")
                 icon = "👥" if mode == "2v2" else "👤"
-                date_str = pd.to_datetime(m["created_at"]).strftime("%d/%m à %Hh%M")
+                dt_utc = pd.to_datetime(m["created_at"])
+                dt_paris = (
+                    dt_utc.tz_convert("Europe/Paris")
+                    if dt_utc.tzinfo
+                    else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+                )
+                date_str = dt_paris.strftime("%d/%m à %Hh%M")
 
                 # B. Récupération sécurisée des pseudos (Gestion des None)
                 # Note : m.get("winner") peut être None si la jointure a échoué, d'où le (Or {})
