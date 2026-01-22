@@ -1252,7 +1252,7 @@ elif page == "🆚 Comparateur de joueurs":
             )
 
         with col_mid:
-            # Titres
+            # --- LOGIQUE DES TITRES ---
             p1_win_rate = vs_stats["p1_wins"] / vs_stats["total"]
             title_text = "⚔️ Duel Équilibré"
             title_color = "#ccc"
@@ -1292,6 +1292,18 @@ elif page == "🆚 Comparateur de joueurs":
             st.progress(p1_win_rate)
             st.caption(f"Taux de victoire de {p1_name} : {p1_win_rate*100:.0f}%")
 
+            # --- AJOUT DU BILAN ELO NET ---
+            elo_color = "#4CAF50" if cumulative_score_elo >= 0 else "#FF5252"
+            st.markdown(
+                f"""
+                <div style='text-align: center; margin-top: 15px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);'>
+                    <div style='font-size: 0.8em; opacity: 0.7; text-transform: uppercase;'>Bilan Elo Net ({p1_name})</div>
+                    <div style='font-size: 1.5em; font-weight: bold; color: {elo_color};'>{cumulative_score_elo:+} pts</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         with col_right:
             st.markdown(
                 f"<h2 style='text-align: center; color: #FF5252;'>{vs_stats['p2_wins']}</h2>",
@@ -1316,12 +1328,12 @@ elif page == "🆚 Comparateur de joueurs":
         with tab_elo:
             chart_elo = (
                 alt.Chart(df_graph)
-                .mark_line(point=True)
-                .encode(  # Point=True + Line (sans step) = Droites
+                .mark_line(point=True)  # Ligne droite avec points
+                .encode(
                     x=alt.X("Match", axis=alt.Axis(tickMinStep=1)),
                     y=alt.Y("Score Cumulé (Elo)", title=f"Avantage Points ({p1_name})"),
                     tooltip=["Date", "Score Cumulé (Elo)"],
-                    color=alt.value("#9b59b6"),  # Violet pour l'Elo
+                    color=alt.value("#9b59b6"),
                 )
                 .properties(height=300)
             )
@@ -1340,15 +1352,15 @@ elif page == "🆚 Comparateur de joueurs":
         with tab_wins:
             chart_wins = (
                 alt.Chart(df_graph)
-                .mark_line(point=True)
-                .encode(  # Lignes droites
+                .mark_line(point=True)  # Ligne droite avec points
+                .encode(
                     x=alt.X("Match", axis=alt.Axis(tickMinStep=1)),
                     y=alt.Y(
                         "Score Cumulé (Victoires)",
                         title=f"Avantage Victoires ({p1_name})",
                     ),
                     tooltip=["Date", "Score Cumulé (Victoires)"],
-                    color=alt.value("#3498db"),  # Bleu pour les victoires
+                    color=alt.value("#3498db"),
                 )
                 .properties(height=300)
             )
