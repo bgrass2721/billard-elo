@@ -18,7 +18,7 @@ st.set_page_config(
 
 def get_badges_html(player, matches_history):
     """
-    Génère les badges avec infobulles descriptives (ex: 'Confirmé : 50 matchs joués').
+    Génère les badges avec progression visible (Barre de progression textuelle dans l'infobulle).
     """
 
     # --- 1. CALCUL DES STATS ---
@@ -28,8 +28,6 @@ def get_badges_html(player, matches_history):
     current_streak = 0
     unique_opponents = set()
     matches_by_day = {}
-
-    # Pour le calcul Duo spécifique
     partners_counter = {}
 
     has_giant_kill = False
@@ -46,11 +44,9 @@ def get_badges_html(player, matches_history):
         matches_by_day[day] += 1
 
         is_2v2 = m.get("mode") == "2v2"
-
-        # Identification du résultat
         is_win = m["winner_id"] == player["id"] or m.get("winner2_id") == player["id"]
 
-        # --- LOGIQUE DUO (Partenaire unique) ---
+        # Stats Partenaires
         if is_2v2:
             partner_id = None
             if m["winner_id"] == player["id"]:
@@ -61,18 +57,16 @@ def get_badges_html(player, matches_history):
                 partner_id = m.get("loser2_id")
             elif m.get("loser2_id") == player["id"]:
                 partner_id = m["loser_id"]
-
             if partner_id:
                 partners_counter[partner_id] = partners_counter.get(partner_id, 0) + 1
 
-        # --- LOGIQUE VICTOIRE / GLOBE TROTTER ---
+        # Stats Victoires / Adversaires
         if is_win:
             wins += 1
             if streak_active:
                 current_streak += 1
             if m.get("elo_gain", 0) >= 30:
                 has_giant_kill = True
-
             opp_ids = [m["loser_id"], m.get("loser2_id")] if is_2v2 else [m["loser_id"]]
             for oid in opp_ids:
                 if oid:
@@ -86,22 +80,22 @@ def get_badges_html(player, matches_history):
                 if oid:
                     unique_opponents.add(oid)
 
-    has_marathon = any(count >= 10 for count in matches_by_day.values())
+    # Calculs finaux pour les progrès
+    max_daily_matches = max(matches_by_day.values()) if matches_by_day else 0
     nb_unique = len(unique_opponents)
-
     max_duo_matches = max(partners_counter.values()) if partners_counter else 0
 
-    # --- 2. FONCTION DE GESTION DES PALIERS ---
+    # Condition Marathon
+    has_marathon = max_daily_matches >= 10
+
+    # --- 2. FONCTION GÉNÉRATRICE AVEC PROGRESSION ---
     html_parts = []
 
     def process_tier_badge(current_val, tiers, shape, base_icon, label):
-        """
-        Gère l'affichage progressif avec infobulle personnalisée.
-        """
         achieved_tier = None
         next_tier = None
 
-        # On cherche le rang actuel
+        # Trouver le niveau actuel
         for tier in tiers:
             if current_val >= tier["req"]:
                 achieved_tier = tier
@@ -109,48 +103,53 @@ def get_badges_html(player, matches_history):
                 next_tier = tier
                 break
 
+        # Construction du texte de progression (ex: "Actuel : 7 adversaires")
+        progress_text = f"<span style='color: #4db8ff; font-weight:bold;'>📊 Actuel : {current_val}</span>"
+
         if achieved_tier:
             style = achieved_tier["style"]
             name = achieved_tier["name"]
 
-            # --- MODIFICATION ICI ---
-            # On construit la description de ce qu'est le badge actuel
-            current_desc = f"{achieved_tier['req']} {label}"
-
             if next_tier:
-                # Format : "Confirmé : 50 matchs joués. Prochain : Pilier (100 matchs joués)"
-                tooltip = f"✅ {name} : {current_desc}. Prochain : {next_tier['name']} ({next_tier['req']} {label})"
+                # Débloqué mais il y a une suite
+                tooltip_text = f"✅ {name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Prochain : {next_tier['name']} ({next_tier['req']} {label})</span>"
             else:
-                tooltip = f"🏆 NIVEAU MAX : {name} ({current_desc})"
+                # Niveau Max atteint
+                tooltip_text = f"🏆 NIVEAU MAX<br>{name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>Vous êtes une légende !</span>"
 
             css_class = ""
             icon = base_icon
-
         else:
-            # Aucun badge
+            # Pas encore de badge
             first_tier = tiers[0]
             style = first_tier["style"]
             name = first_tier["name"]
-            tooltip = f"🔒 BLOQUÉ : Il faut {first_tier['req']} {label} pour débloquer"
+            tooltip_text = f"🔒 BLOQUÉ<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Objectif : {first_tier['req']} {label}</span>"
             css_class = "locked"
             icon = base_icon
 
         html_parts.append(
-            f"""<div class="badge-item {css_class}" title="{tooltip}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div></div>"""
+            f"""
+            <div class="badge-item {css_class}">
+                <div class="badge-icon-box {shape} {style}">{icon}</div>
+                <div class="badge-name">{name}</div>
+                <span class="tooltip-content">{tooltip_text}</span>
+            </div>
+            """
         )
 
-    # --- 3. DÉFINITION DES FAMILLES ---
+    # --- 3. APPELS DES FAMILLES ---
 
-    # A. FIDÉLITÉ (Shields)
+    # A. Matchs joués
     tiers_fidelity = [
         {"req": 10, "style": "bronze", "name": "Rookie"},
         {"req": 50, "style": "silver", "name": "Confirmé"},
         {"req": 100, "style": "gold", "name": "Pilier"},
         {"req": 200, "style": "platinum", "name": "Légende"},
     ]
-    process_tier_badge(total_matches, tiers_fidelity, "shield", "⚔️", "matchs joués")
+    process_tier_badge(total_matches, tiers_fidelity, "shield", "⚔️", "matchs")
 
-    # B. VICTOIRES (Stars)
+    # B. Victoires
     tiers_victory = [
         {"req": 10, "style": "bronze", "name": "Gâchette"},
         {"req": 25, "style": "silver", "name": "Conquérant"},
@@ -159,61 +158,83 @@ def get_badges_html(player, matches_history):
     ]
     process_tier_badge(wins, tiers_victory, "star", "🏆", "victoires")
 
-    # C. DUO (Circles)
+    # C. Duo (Même partenaire)
     tiers_duo = [
         {"req": 10, "style": "bronze", "name": "Binôme"},
         {"req": 30, "style": "silver", "name": "Frères d'armes"},
         {"req": 60, "style": "gold", "name": "Fusion"},
         {"req": 120, "style": "platinum", "name": "Symbiose"},
     ]
-    process_tier_badge(
-        max_duo_matches, tiers_duo, "circle", "🤝", "matchs avec le même partenaire"
-    )
+    process_tier_badge(max_duo_matches, tiers_duo, "circle", "🤝", "matchs ensemble")
 
-    # D. SOCIAL (Circles)
+    # D. Adversaires Uniques
     tiers_social = [
         {"req": 5, "style": "bronze", "name": "Explorateur"},
         {"req": 10, "style": "silver", "name": "Voyageur"},
         {"req": 20, "style": "gold", "name": "Monde"},
         {"req": 40, "style": "platinum", "name": "Universel"},
     ]
-    process_tier_badge(nb_unique, tiers_social, "circle", "🌍", "adversaires uniques")
+    process_tier_badge(nb_unique, tiers_social, "circle", "🌍", "adversaires")
 
-    # --- 4. BADGES SPÉCIAUX ---
-
-    def add_special(cond, shape, style, icon, name, desc):
+    # --- 4. SPÉCIAUX (Avec progression personnalisée) ---
+    def add_special(cond, shape, style, icon, name, desc, current_stat=""):
         css = "" if cond else "locked"
-        tooltip = f"✅ {desc}" if cond else f"🔒 BLOQUÉ : {desc}"
-        html_parts.append(
-            f"""<div class="badge-item {css}" title="{tooltip}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div></div>"""
+        # On ajoute la ligne de stat si elle est fournie
+        stat_line = (
+            f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>"
+            if current_stat
+            else ""
         )
 
-    # On Fire (Série de 5)
+        if cond:
+            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
+        else:
+            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
+
+        html_parts.append(
+            f"""
+            <div class="badge-item {css}">
+                <div class="badge-icon-box {shape} {style}">{icon}</div>
+                <div class="badge-name">{name}</div>
+                <span class="tooltip-content">{tooltip_text}</span>
+            </div>
+            """
+        )
+
+    # On Fire : On montre la série actuelle
     add_special(
         current_streak >= 5,
         "hexagon",
         "magma",
         "🔥",
         "On Fire",
-        "Série active de 5 victoires",
+        "Série de 5 victoires",
+        f"Série actuelle : {current_streak}",
     )
 
-    # Marathon (10 matchs/jour)
+    # Marathon : On montre le record perso sur une journée
     add_special(
         has_marathon,
         "hexagon",
         "electric",
         "⚡",
         "Marathon",
-        "Jouer 10 matchs en 1 jour",
+        "10 matchs en 1 jour",
+        f"Record jour : {max_daily_matches}",
     )
 
-    # Giant Slayer (+200 Elo)
+    # Giant Slayer : Pas de compteur progressif pertinent, juste Oui/Non
+    giant_text = "Accompli !" if has_giant_kill else "Pas encore..."
     add_special(
-        has_giant_kill, "hexagon", "blood", "🩸", "Tueur", "Battre un joueur +200 Elo"
+        has_giant_kill,
+        "hexagon",
+        "blood",
+        "🩸",
+        "Tueur",
+        "Battre un +200 Elo",
+        giant_text,
     )
 
-    # --- 5. RENDU ---
     return f"""<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);">{''.join(html_parts)}</div>"""
 
 
@@ -342,6 +363,41 @@ st.markdown(
     .badge-icon-box.star {
         font-size: 14px;
         padding-top: 2px;
+    }
+    /* --- INFOBULLE (TOOLTIP) - MOBILE COMPATIBLE --- */
+    .tooltip-content {
+        visibility: hidden;
+        width: 150px; /* Un peu plus large pour le texte de progression */
+        background-color: rgba(0, 0, 0, 0.95);
+        color: #fff;
+        text-align: center;
+        border-radius: 8px;
+        padding: 8px;
+        position: absolute;
+        z-index: 100;
+        top: 105%; left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px; font-weight: normal; line-height: 1.4;
+        border: 1px solid rgba(255,255,255,0.2);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        opacity: 0; transition: opacity 0.3s;
+        pointer-events: none;
+    }
+
+    /* Flèche du haut */
+    .tooltip-content::after {
+        content: ""; position: absolute; bottom: 100%; left: 50%; margin-left: -5px;
+        border-width: 5px; border-style: solid;
+        border-color: transparent transparent rgba(0,0,0,0.95) transparent;
+    }
+
+    /* L'ACTIVATION MOBILE (Le secret est ici) */
+    /* :active et :focus permettent l'affichage au clic sur téléphone */
+    .badge-item:hover .tooltip-content,
+    .badge-item:active .tooltip-content,
+    .badge-item:focus .tooltip-content {
+        visibility: visible;
+        opacity: 1;
     }
     </style>
     """,
