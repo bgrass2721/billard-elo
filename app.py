@@ -1813,80 +1813,117 @@ elif page == "🏟️ Grand Tournoi":
                         tier_matches = [m for m in matches_brk if m["bracket_match_id"].startswith(prefix)]
                         tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
                         
-                        # Détermination du nombre de colonnes
-                        has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches_brk)
-                        if prefix == "WB":
-                            num_rounds = total_rounds_wb + 2 if (has_reset and is_double_elim) else (total_rounds_wb + 1 if is_double_elim else total_rounds_wb)
-                        else:
-                            num_rounds = (total_rounds_wb - 1) * 2
-
-                        # Le container global avec "display: flex"
-                        html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
-                        html += f"<div style='display: flex; flex-direction: row; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: {'600px' if prefix == 'WB' else '400px'};'>"
-                        
-                        for r_num in range(1, num_rounds + 1):
-                            # Chaque colonne utilise space-around pour centrer mathématiquement les matchs
-                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
+                        # Fonction interne magique : Génère le code HTML d'un match (Évite de répéter le code)
+                        def get_match_card(r_num, m_num, is_gf=False):
+                            b_id = f"{prefix}_R{r_num}_M{m_num}"
+                            m = tier_dict.get(b_id)
                             
-                            # Titre de la colonne
-                            if prefix == "WB" and r_num == total_rounds_wb + 1: col_title = "👑 Grande Finale"
-                            elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Bracket Reset"
-                            else: col_title = f"Tour {r_num}"
-                            html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
+                            bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else "#1E1E28"
+                            border_color = "#FFD700" if is_gf else "#444"
                             
-                            # Logique du nombre de matchs par tour
-                            if prefix == "WB":
-                                virtual_round = min(r_num, total_rounds_wb)
-                                expected_count = max(1, nb_matches_r1 // (2**(virtual_round-1)))
-                            else:
-                                virtual_round = math.ceil(r_num / 2)
-                                expected_count = max(1, nb_matches_r1 // (2**virtual_round))
+                            c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
+                            c_html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
+                            
+                            if m:
+                                p1 = all_users_spec.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
+                                p2 = all_users_spec.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
+                                s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                 
-                            # Container interne pour les matchs pour que le space-around agisse uniquement sur eux
-                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
-
-                            for m_num in range(1, expected_count + 1):
-                                b_id = f"{prefix}_R{r_num}_M{m_num}"
-                                m = tier_dict.get(b_id)
-                                
-                                is_gf = (prefix == "WB" and r_num > total_rounds_wb)
-                                bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else "#1E1E28"
-                                border_color = "#FFD700" if is_gf else "#444"
-                                
-                                # La carte de match
-                                html += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
-                                html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
-                                
-                                if m:
-                                    p1 = all_users_spec.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
-                                    p2 = all_users_spec.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
-                                    s1, s2 = m.get("score1", 0), m.get("score2", 0)
-                                    
-                                    if m["status"] == "completed":
-                                        w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
-                                        w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                        c1 = "#4CAF50" if s1 > s2 else "#888"
-                                        c2 = "#4CAF50" if s2 > s1 else "#888"
-                                    else:
-                                        w1 = w2 = "normal; color: white;"
-                                        c1 = c2 = "transparent"
-                                        if p1 == "..." and p2 == "...": s1 = s2 = ""
-                                        
-                                    html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1}; font-weight: bold;'>{s1}</span></div>"
-                                    html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2}; font-weight: bold;'>{s2}</span></div>"
+                                if m["status"] == "completed":
+                                    w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
+                                    w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
+                                    c1 = "#4CAF50" if s1 > s2 else "#888"
+                                    c2 = "#4CAF50" if s2 > s1 else "#888"
                                 else:
-                                    html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div>"
-                                    html += "<div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
-                                
-                                html += "</div>" # Fin de carte
+                                    w1 = w2 = "normal; color: white;"
+                                    c1 = c2 = "transparent"
+                                    if p1 == "..." and p2 == "...": s1 = s2 = ""
+                                    
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1}; font-weight: bold;'>{s1}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2}; font-weight: bold;'>{s2}</span></div>"
+                            else:
+                                c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div>"
+                                c_html += "<div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
+                            
+                            c_html += "</div>"
+                            return c_html
 
-                            html += "</div>" # Fin container interne matchs
-                            html += "</div>" # Fin colonne
-                        html += "</div>" # Fin container global flex
+                        html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
+                        
+                        # --- 1. DOUBLE ÉLIMINATION ou LOSER BRACKET (Classique de gauche à droite) ---
+                        if is_double_elim or prefix == "LB":
+                            has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches_brk)
+                            if prefix == "WB":
+                                num_rounds = total_rounds_wb + 2 if (has_reset and is_double_elim) else (total_rounds_wb + 1 if is_double_elim else total_rounds_wb)
+                            else:
+                                num_rounds = (total_rounds_wb - 1) * 2
+
+                            html += f"<div style='display: flex; flex-direction: row; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: {'600px' if prefix == 'WB' else '400px'};'>"
+                            for r_num in range(1, num_rounds + 1):
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
+                                
+                                if prefix == "WB" and r_num == total_rounds_wb + 1: col_title = "👑 Grande Finale"
+                                elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Bracket Reset"
+                                else: col_title = f"Tour {r_num}"
+                                html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
+                                
+                                if prefix == "WB":
+                                    virtual_round = min(r_num, total_rounds_wb)
+                                    expected_count = max(1, nb_matches_r1 // (2**(virtual_round-1)))
+                                else:
+                                    virtual_round = math.ceil(r_num / 2)
+                                    expected_count = max(1, nb_matches_r1 // (2**virtual_round))
+                                    
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                for m_num in range(1, expected_count + 1):
+                                    is_gf = (prefix == "WB" and r_num > total_rounds_wb)
+                                    html += get_match_card(r_num, m_num, is_gf)
+                                html += "</div></div>"
+                            html += "</div>"
+                            
+                        # --- 2. SINGLE ÉLIMINATION (Format Symétrique Papillon) ---
+                        else:
+                            html += "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: 400px;'>"
+                            
+                            # A. PARTIE GAUCHE
+                            html += "<div style='display: flex; flex-direction: row;'>"
+                            for r_num in range(1, total_rounds_wb):
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
+                                html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>Tour {r_num}</div>"
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                half_count = expected_count // 2
+                                for m_num in range(1, half_count + 1):
+                                    html += get_match_card(r_num, m_num)
+                                html += "</div></div>"
+                            html += "</div>"
+                            
+                            # B. CENTRE (Finale)
+                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 220px; margin: 0 10px;'>"
+                            html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
+                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                            html += get_match_card(total_rounds_wb, 1, is_gf=True)
+                            html += "</div></div>"
+                            
+                            # C. PARTIE DROITE (On inverse l'ordre !)
+                            html += "<div style='display: flex; flex-direction: row-reverse;'>"
+                            for r_num in range(1, total_rounds_wb):
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-left: 30px;'>"
+                                html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>Tour {r_num}</div>"
+                                html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                half_count = expected_count // 2
+                                for m_num in range(half_count + 1, expected_count + 1):
+                                    html += get_match_card(r_num, m_num)
+                                html += "</div></div>"
+                            html += "</div>"
+                            
+                            html += "</div>" # Fin du flex-start
+                        
                         return html
 
                     # Affichage via la fonction markdown HTML
-                    st.markdown(render_css_bracket("WB", "🏆 Winner Bracket"), unsafe_allow_html=True)
+                    st.markdown(render_css_bracket("WB", "🏆 L'Arbre du Tournoi"), unsafe_allow_html=True)
                     
                     if is_double_elim:
                         st.divider()
