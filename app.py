@@ -378,48 +378,34 @@ st.markdown(
 if "user_data" not in st.session_state:
     st.session_state.user_data = None
 
-# Tentative de reconnexion automatique via Cookies SÉCURISÉS
+# --- RESTAURATION DE LA SESSION SUPABASE ---
+# On récupère les tokens cryptés
+access_token = cookie_manager.get("bb_access_token")
+refresh_token = cookie_manager.get("bb_refresh_token")
+
+# 1. On s'assure que la connexion base de données sait QUI on est à chaque clic
+if access_token and refresh_token and not st.session_state.logout_clicked:
+    try:
+        db.supabase.auth.set_session(access_token, refresh_token)
+    except Exception:
+        pass # Le token est peut-être expiré
+
+# 2. On récupère les données du profil SEULEMENT si elles ne sont pas déjà en mémoire
 if st.session_state.user_data is None and not st.session_state.logout_clicked:
-    # 1. On récupère les tokens cryptés
-    access_token = cookie_manager.get("bb_access_token")
-    refresh_token = cookie_manager.get("bb_refresh_token")
-
-    if access_token and refresh_token:
-        try:
-            # 2. On restaure la session Supabase avec ces tokens
-            # Cela vérifie automatiquement si le token est valide et non falsifié
-            session = db.supabase.auth.set_session(access_token, refresh_token)
-
-            # 3. Si la session est valide, on récupère l'utilisateur
-            if session and session.user:
-                user_profile = (
-                    db.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", session.user.id)
-                    .single()
-                    .execute()
-                )
-                if user_profile.data:
-                    st.session_state.user_data = user_profile.data
-        except Exception:
-            # Si le token est expiré ou invalide (tentative de hack), on ne fait rien
-            pass
-
-    # 2. Si toujours rien, on tente de récupérer la session active Supabase
-    if st.session_state.user_data is None:
-        try:
-            session = db.supabase.auth.get_session()
-            if session and session.user:
-                user_profile = (
-                    db.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", session.user.id)
-                    .single()
-                    .execute()
-                )
+    try:
+        session = db.supabase.auth.get_session()
+        if session and session.user:
+            user_profile = (
+                db.supabase.table("profiles")
+                .select("*")
+                .eq("id", session.user.id)
+                .single()
+                .execute()
+            )
+            if user_profile.data:
                 st.session_state.user_data = user_profile.data
-        except Exception:
-            pass
+    except Exception:
+        pass
 
 # --- ÉCRAN DE CONNEXION / INSCRIPTION ---
 if st.session_state.user_data is None:
@@ -560,6 +546,7 @@ menu_options = [
     "🎯 Déclarer un match",
     "🆚 Comparateur de joueurs",
     "📑 Mes validations",
+    "🏟️ Grand Tournoi",
     "📢 Nouveautés",
     "📜 Règlement",
     "⚙️ Paramètres",
@@ -1710,6 +1697,777 @@ elif page == "🔧 Panel Admin":
             f"✅ Synchronisation terminée ! {corrected_matches} matchs historiques corrigés."
         )
         st.balloons()
+
+elif page == "🏟️ Grand Tournoi":
+    st.header("🏟️ Espace Grand Tournoi")
+    
+    # On sépare la vue Admin de la vue Spectateur
+    is_admin = user.get("is_admin", False)
+    
+    if is_admin:
+        tab_spectator, tab_admin = st.tabs(["👁️ Vue Spectateur", "🛠️ Panel Admin Tournoi"])
+    else:
+        tab_spectator = st.container() # Le joueur normal ne voit que ça
+        
+    # --- VUE SPECTATEUR (Publique) ---
+    with tab_spectator:
+        tournaments = db.get_grand_tournaments().data
+        
+        if not tournaments:
+            st.info("Aucun Grand Tournoi n'a été organisé pour le moment.")
+        else:
+            # Sélecteur de tournoi pour le public
+            t_map_spec = {f"{t['name']}": t for t in tournaments}
+            selected_t_spec_name = st.selectbox("Sélectionnez un tournoi à regarder :", list(t_map_spec.keys()), key="spec_select")
+            selected_t_spec = t_map_spec[selected_t_spec_name]
+            
+            st.divider()
+            
+            # Affichage de l'en-tête du tournoi
+            status_map = {
+                "draft": "🛠️ En préparation",
+                "groups": "🟢 Phase de Poules en cours",
+                "bracket": "⚔️ Phase Finale en cours",
+                "completed": "🏁 Terminé"
+            }
+            st.markdown(f"### {selected_t_spec['name']}")
+            st.caption(f"Statut : {status_map.get(selected_t_spec['status'], 'Inconnu')} | Format : {selected_t_spec['format']}")
+            
+            # --- CAS 1 : BROUILLON ---
+            if selected_t_spec["status"] == "draft":
+                st.info("Les inscriptions et le tirage des poules sont en cours. Revenez plus tard !")
+                
+            # --- CAS 2 & 3 : POULES ET ARBRE ---
+            if selected_t_spec["status"] in ["groups", "bracket", "completed"]:
+                st.markdown("#### 📊 Phase de Poules")
+                matches_grp = db.get_gt_matches(selected_t_spec["id"], "group").data
+                parts = db.get_tournament_participants(selected_t_spec["id"]).data
+                all_users_spec = {p["id"]: p["username"] for p in db.get_leaderboard().data}
+                
+                if not parts:
+                    st.write("Aucune poule générée.")
+                else:
+                    group_letters = sorted(list(set([p["group_name"] for p in parts if p["group_name"]])))
+                    
+                    # Utilisation d'onglets pour une navigation mobile fluide
+                    if group_letters:
+                        tabs_poules = st.tabs([f"Poule {g}" for g in group_letters])
+                        for idx, g in enumerate(group_letters):
+                            with tabs_poules[idx]:
+                                g_matches = [m for m in matches_grp if m["group_name"] == g]
+                                g_parts = [p for p in parts if p["group_name"] == g]
+                                
+                                # Calcul classement
+                                standings = {}
+                                for p in g_parts:
+                                    standings[p["user_id"]] = {"Nom": all_users_spec.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
+                                    
+                                for m in g_matches:
+                                    if m["status"] == "completed":
+                                        s1, s2 = m["score1"], m["score2"]
+                                        p1, p2 = m["player1_id"], m["player2_id"]
+                                        if p1 in standings:
+                                            if s1 > s2: standings[p1]["V"] += 1
+                                            else: standings[p1]["D"] += 1
+                                            standings[p1]["Diff"] += (s1 - s2)
+                                        if p2 in standings:
+                                            if s2 > s1: standings[p2]["V"] += 1
+                                            else: standings[p2]["D"] += 1
+                                            standings[p2]["Diff"] += (s2 - s1)
+                                            
+                                sorted_standings = sorted(standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
+                                import pandas as pd
+                                df_standings = pd.DataFrame(sorted_standings)
+                                df_standings.index = df_standings.index + 1
+                                st.dataframe(df_standings, use_container_width=True)
+                                
+                                # Liste des matchs joués/à venir
+                                if g_matches:
+                                    st.markdown("**Matchs :**")
+                                    for m in g_matches:
+                                        p1_name = all_users_spec.get(m["player1_id"], "?")
+                                        p2_name = all_users_spec.get(m["player2_id"], "?")
+                                        if m["status"] == "completed":
+                                            # Affichage visuel du gagnant
+                                            st.markdown(f"**{p1_name}** `{m['score1']} - {m['score2']}` **{p2_name}** ✅")
+                                        else:
+                                            st.markdown(f"{p1_name} `vs` {p2_name} ⏳")
+
+            # --- CAS 3 : ARBRE UNIQUEMENT ---
+            if selected_t_spec["status"] in ["bracket", "completed"]:
+                st.divider()
+                st.markdown("#### 🌳 Phase Finale (Arbre)")
+                
+                matches_brk = db.get_gt_matches(selected_t_spec["id"], "bracket").data
+                
+                if not matches_brk:
+                    st.info("L'arbre est en cours de construction.")
+                else:
+                    import math
+                    nb_matches_r1 = 8 if "32" in selected_t_spec["format"] else 16
+                    total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
+                    is_double_elim = "double" in selected_t_spec["format"]
+                    
+                    # LA SOLUTION DÉFINITIVE : Génération d'un arbre HTML/Flexbox
+                    def render_css_bracket(prefix, title):
+                        tier_matches = [m for m in matches_brk if m["bracket_match_id"].startswith(prefix)]
+                        tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
+                        
+                        # Détermination du nombre de colonnes
+                        has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches_brk)
+                        if prefix == "WB":
+                            num_rounds = total_rounds_wb + 2 if (has_reset and is_double_elim) else (total_rounds_wb + 1 if is_double_elim else total_rounds_wb)
+                        else:
+                            num_rounds = (total_rounds_wb - 1) * 2
+
+                        # Le container global avec "display: flex"
+                        html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
+                        html += f"<div style='display: flex; flex-direction: row; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: {'600px' if prefix == 'WB' else '400px'};'>"
+                        
+                        for r_num in range(1, num_rounds + 1):
+                            # Chaque colonne utilise space-around pour centrer mathématiquement les matchs
+                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
+                            
+                            # Titre de la colonne
+                            if prefix == "WB" and r_num == total_rounds_wb + 1: col_title = "👑 Grande Finale"
+                            elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Bracket Reset"
+                            else: col_title = f"Tour {r_num}"
+                            html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
+                            
+                            # Logique du nombre de matchs par tour
+                            if prefix == "WB":
+                                virtual_round = min(r_num, total_rounds_wb)
+                                expected_count = max(1, nb_matches_r1 // (2**(virtual_round-1)))
+                            else:
+                                virtual_round = math.ceil(r_num / 2)
+                                expected_count = max(1, nb_matches_r1 // (2**virtual_round))
+                                
+                            # Container interne pour les matchs pour que le space-around agisse uniquement sur eux
+                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+
+                            for m_num in range(1, expected_count + 1):
+                                b_id = f"{prefix}_R{r_num}_M{m_num}"
+                                m = tier_dict.get(b_id)
+                                
+                                is_gf = (prefix == "WB" and r_num > total_rounds_wb)
+                                bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else "#1E1E28"
+                                border_color = "#FFD700" if is_gf else "#444"
+                                
+                                # La carte de match
+                                html += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
+                                html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
+                                
+                                if m:
+                                    p1 = all_users_spec.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
+                                    p2 = all_users_spec.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
+                                    s1, s2 = m.get("score1", 0), m.get("score2", 0)
+                                    
+                                    if m["status"] == "completed":
+                                        w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
+                                        w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
+                                        c1 = "#4CAF50" if s1 > s2 else "#888"
+                                        c2 = "#4CAF50" if s2 > s1 else "#888"
+                                    else:
+                                        w1 = w2 = "normal; color: white;"
+                                        c1 = c2 = "transparent"
+                                        if p1 == "..." and p2 == "...": s1 = s2 = ""
+                                        
+                                    html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1}; font-weight: bold;'>{s1}</span></div>"
+                                    html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2}; font-weight: bold;'>{s2}</span></div>"
+                                else:
+                                    html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div>"
+                                    html += "<div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
+                                
+                                html += "</div>" # Fin de carte
+
+                            html += "</div>" # Fin container interne matchs
+                            html += "</div>" # Fin colonne
+                        html += "</div>" # Fin container global flex
+                        return html
+
+                    # Affichage via la fonction markdown HTML
+                    st.markdown(render_css_bracket("WB", "🏆 Winner Bracket"), unsafe_allow_html=True)
+                    
+                    if is_double_elim:
+                        st.divider()
+                        st.markdown(render_css_bracket("LB", "💀 Loser Bracket (Repêchages)"), unsafe_allow_html=True)
+
+    # --- VUE ADMIN (Privée) ---
+    if is_admin:
+        with tab_admin:
+            st.header("⚙️ Administration des Tournois")
+            
+            # --- OUTIL : CRÉATION DE FANTÔMES ---
+            with st.expander("👻 Créer un Joueur Fantôme (Pour les archives)"):
+                st.info("Ces joueurs apparaîtront dans la liste pour pouvoir être ajoutés à un tournoi, mais ils n'auront pas de compte pour se connecter et n'impacteront pas le classement général.")
+                
+                c1, c2 = st.columns([3, 1])
+                ghost_name = c1.text_input("Prénom et Nom du joueur", placeholder="Ex: Paul Dupont", label_visibility="collapsed")
+                
+                if c2.button("Créer le joueur", use_container_width=True):
+                    if len(ghost_name) < 3:
+                        st.error("Le nom doit contenir au moins 3 caractères.")
+                    else:
+                        # On rajoute un petit repère visuel (Optionnel, tu peux l'enlever si tu préfères)
+                        final_name = f"{ghost_name}"
+                        success, msg = db.create_ghost_player(final_name)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            st.divider()
+
+            # --- OUTIL : FUSION FANTÔME -> VRAI JOUEUR ---
+            with st.expander("🔄 Remplacer un Fantôme par un Vrai Joueur"):
+                st.info("Transférez tout l'historique d'un profil fantôme vers le vrai compte d'un joueur qui vient de s'inscrire, puis supprimez le fantôme.")
+                
+                all_profiles = db.get_all_profiles().data
+                all_profiles = sorted(all_profiles, key=lambda x: x["username"].lower() if x.get("username") else "")
+                
+                # --- LE FILTRAGE INTELLIGENT ---
+                ghost_profiles = [p for p in all_profiles if p.get("is_ghost") == True]
+                real_profiles = [p for p in all_profiles if p.get("is_ghost") != True] # false ou null
+                
+                ghost_map = {f"{p['username']} ({p['id'][:4]})": p["id"] for p in ghost_profiles if p.get("username")}
+                real_map = {f"{p['username']} ({p['id'][:4]})": p["id"] for p in real_profiles if p.get("username")}
+                
+                c1, c2 = st.columns(2)
+                # La liste 1 ne contient QUE les fantômes
+                ghost_choice = c1.selectbox("1. Le profil Fantôme (à supprimer)", ["-- Sélectionner --"] + list(ghost_map.keys()), key="merge_ghost")
+                # La liste 2 ne contient QUE les vrais joueurs
+                real_choice = c2.selectbox("2. Le Vrai Compte (qui récupère l'historique)", ["-- Sélectionner --"] + list(real_map.keys()), key="merge_real")
+                
+                if st.button("Fusionner et Remplacer", use_container_width=True, type="primary"):
+                    if ghost_choice == "-- Sélectionner --" or real_choice == "-- Sélectionner --":
+                        st.error("Veuillez sélectionner les deux profils à fusionner.")
+                    else:
+                        ghost_id = ghost_map[ghost_choice]
+                        real_id = real_map[real_choice]
+                        
+                        success, msg = db.merge_ghost_to_real(ghost_id, real_id)
+                        if success:
+                            st.success(msg)
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            st.subheader("1. Créer un nouveau tournoi")
+            with st.form("new_tournament_form"):
+                t_name = st.text_input("Nom de l'événement (ex: Grand Open d'Hiver)")
+                t_format = st.selectbox("Format", [
+                    "32_single", # 32 Joueurs - Elimination simple
+                    "64_single", # 64 Joueurs - Elimination simple
+                    "32_double"  # 32 Joueurs - Double elimination (Loser Bracket)
+                ])
+                
+                if st.form_submit_button("Créer le tournoi (Brouillon)"):
+                    if not t_name:
+                        st.error("Veuillez donner un nom au tournoi.")
+                    else:
+                        success, data_or_err = db.create_grand_tournament(t_name, t_format)
+                        if success:
+                            st.success("Tournoi créé avec succès ! Vous pouvez maintenant gérer les inscrits.")
+                            st.rerun()
+                        else:
+                            st.error(data_or_err)
+
+            st.divider()
+            
+            # --- 2. GESTION DES TOURNOIS EXISTANTS ---
+            st.subheader("2. Gérer un tournoi existant")
+            
+            # On réutilise la variable 'tournaments' récupérée plus haut dans la vue spectateur
+            if not tournaments:
+                st.write("Aucun tournoi à gérer pour le moment.")
+            else:
+                # Création d'un dictionnaire pour le selectbox (Titre propre -> Données du tournoi)
+                t_map = {f"{t['name']} ({t['format']} - {t['status']})": t for t in tournaments}
+                selected_t_name = st.selectbox("Sélectionnez le tournoi à administrer :", list(t_map.keys()))
+                selected_t = t_map[selected_t_name]
+
+                # ==========================================
+                # PHASE : BROUILLON (DRAFT & POULES)
+                # ==========================================
+                if selected_t["status"] == "draft":
+                    st.info("📝 Ce tournoi est en préparation. Constituez vos poules !")
+                    
+                    # 1. On récupère tous les profils (Vrais joueurs + Fantômes)
+                    all_app_users = db.get_all_profiles().data
+                    
+                    # NOUVEAU : On trie tout le monde par ordre alphabétique de A à Z
+                    all_app_users = sorted(all_app_users, key=lambda x: x["username"].lower() if x.get("username") else "")
+                    
+                    # Création du dictionnaire pour les menus déroulants
+                    user_options = {p["username"]: p["id"] for p in all_app_users if p.get("username")}
+                    
+                    # 2. On récupère la configuration actuelle (si on avait déjà commencé à remplir)
+                    existing_parts = db.get_tournament_participants(selected_t["id"]).data
+                    current_groups = {}
+                    for ep in existing_parts:
+                        g = ep.get("group_name")
+                        uname = ep.get("profiles", {}).get("username")
+                        if g and uname:
+                            if g not in current_groups:
+                                current_groups[g] = []
+                            current_groups[g].append(uname)
+
+                    # 3. Combien de poules générer ?
+                    nb_groups = 8 if "32" in selected_t["format"] else 16
+                    group_letters = [chr(65+i) for i in range(nb_groups)]
+
+                    st.write("Sélectionnez les joueurs pour chaque poule (4 conseillés).")
+                    
+                    # --- NOUVEAUTÉ : Initialisation de la mémoire pour l'interface dynamique ---
+                    for g in group_letters:
+                        key = f"draft_{selected_t['id']}_{g}"
+                        if key not in st.session_state:
+                            # On charge les valeurs de la base de données au premier affichage
+                            st.session_state[key] = [val for val in current_groups.get(g, []) if val in user_options]
+
+                    # --- Calcul des joueurs déjà sélectionnés PARTOUT ---
+                    all_selected_players = set()
+                    for g in group_letters:
+                        key = f"draft_{selected_t['id']}_{g}"
+                        all_selected_players.update(st.session_state[key])
+
+                    # --- Affichage dynamique (HORS d'un st.form) ---
+                    cols = st.columns(2)
+                    selections = {}
+                    
+                    for i, g in enumerate(group_letters):
+                        col = cols[i % 2]
+                        key = f"draft_{selected_t['id']}_{g}"
+                        
+                        # LE FILTRE MAGIQUE : Tous les joueurs SAUF ceux déjà pris ailleurs
+                        available_players = [
+                            p for p in user_options.keys() 
+                            if p not in all_selected_players or p in st.session_state[key]
+                        ]
+                        
+                        selections[g] = col.multiselect(
+                            f"Poule {g}", 
+                            options=available_players, 
+                            key=key, # Relie directement le widget à la mémoire
+                            max_selections=5
+                        )
+                        
+                    # --- Boutons d'actions ---
+                    if st.button("💾 Sauvegarder les poules"):
+                        flat_data = []
+                        for g, unames in selections.items():
+                            for uname in unames:
+                                flat_data.append({
+                                    "user_id": user_options[uname],
+                                    "group_name": g
+                                })
+                        
+                        success, msg = db.save_tournament_groups(selected_t["id"], flat_data)
+                        if success:
+                            st.success(msg)
+                            # On nettoie la mémoire pour s'assurer que tout est frais au prochain affichage
+                            for g in group_letters:
+                                del st.session_state[f"draft_{selected_t['id']}_{g}"]
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+                    st.write("")
+                    if st.button("🏁 Verrouiller et Lancer la phase de Poules", type="primary"):
+                        total_inscrits = len(existing_parts)
+                        if total_inscrits < 2:
+                            st.error("Il faut au moins 2 joueurs pour lancer un tournoi.")
+                        else:
+                            # --- APPEL DU GÉNÉRATEUR ICI ---
+                            db.generate_group_matches(selected_t["id"])
+                            st.success("Le tournoi est lancé ! Les matchs de poule sont générés.")
+                            st.balloons()
+                            st.rerun()
+                            
+                # ==========================================
+                # PHASE : POULES (SAISIE DES SCORES)
+                # ==========================================
+                elif selected_t["status"] == "groups":
+                    st.success("🟢 Phase de poules en cours.")
+                    
+                    # 1. On récupère les données
+                    matches = db.get_gt_matches(selected_t["id"], "group").data
+                    participants = db.get_tournament_participants(selected_t["id"]).data
+                    
+                    # NOUVEAU : On utilise get_all_profiles() pour inclure les fantômes !
+                    all_users = {p["id"]: p["username"] for p in db.get_all_profiles().data}
+                    
+                    # 2. On regroupe par lettre de poule
+                    group_letters = sorted(list(set([m["group_name"] for m in matches])))
+                    
+                    for g in group_letters:
+                        with st.expander(f"📊 Gestion de la Poule {g}", expanded=True):
+                            g_matches = [m for m in matches if m["group_name"] == g]
+                            g_parts = [p for p in participants if p["group_name"] == g]
+                            
+                            # --- CALCUL DU CLASSEMENT EN TEMPS RÉEL ---
+                            standings = {}
+                            for p in g_parts:
+                                standings[p["user_id"]] = {"Nom": all_users.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
+                                
+                            for m in g_matches:
+                                if m["status"] == "completed":
+                                    s1, s2 = m["score1"], m["score2"]
+                                    p1, p2 = m["player1_id"], m["player2_id"]
+                                    
+                                    # Stats P1
+                                    if p1 in standings:
+                                        if s1 > s2: standings[p1]["V"] += 1
+                                        else: standings[p1]["D"] += 1
+                                        standings[p1]["Diff"] += (s1 - s2)
+                                        
+                                    # Stats P2
+                                    if p2 in standings:
+                                        if s2 > s1: standings[p2]["V"] += 1
+                                        else: standings[p2]["D"] += 1
+                                        standings[p2]["Diff"] += (s2 - s1)
+                            
+                            # Tri du classement : Victoires d'abord, Différence de manches ensuite
+                            sorted_standings = sorted(standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
+                            
+                            st.markdown("**Classement Actuel :**")
+                            import pandas as pd
+                            df_standings = pd.DataFrame(sorted_standings)
+                            df_standings.index = df_standings.index + 1 # Index commence à 1
+                            st.dataframe(df_standings, use_container_width=True)
+                            
+                            st.divider()
+                            st.markdown("**Saisie des Matchs :**")
+                            
+                            # --- AFFICHAGE DES MATCHS POUR SAISIE ---
+                            for m in g_matches:
+                                p1_name = all_users.get(m["player1_id"], "?")
+                                p2_name = all_users.get(m["player2_id"], "?")
+                                is_done = m["status"] == "completed"
+                                
+                                c1, c2, c3, c4, c5 = st.columns([3, 1, 0.5, 1, 2])
+                                c1.write(f"**{p1_name}** vs **{p2_name}**" + (" ✅" if is_done else ""))
+                                
+                                # Inputs pour les scores
+                                score1 = c2.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"s1_{m['id']}", label_visibility="collapsed")
+                                c3.write("-")
+                                score2 = c4.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"s2_{m['id']}", label_visibility="collapsed")
+                                
+                                # Bouton de validation
+                                btn_label = "Mettre à jour" if is_done else "Valider"
+                                if c5.button(btn_label, key=f"btn_{m['id']}"):
+                                    if score1 == score2:
+                                        st.error("Il ne peut pas y avoir d'égalité (Match nul) au billard !")
+                                    else:
+                                        # On lance la mise à jour
+                                        success = db.update_gt_match_score(m["id"], score1, score2, m["player1_id"], m["player2_id"])
+                                        
+                                        if success:
+                                            # Si tout va bien, on met à jour l'écran
+                                            st.rerun()
+                                        # Si success est False, on ne fait rien sur l'interface web.
+                                        # L'erreur t'attend sagement dans ton terminal !
+                                        st.rerun()
+                    # ==========================================
+                    # LE TIRAGE AU SORT (TRANSITION VERS L'ARBRE)
+                    # ==========================================
+                    st.divider()
+                    st.subheader("🎲 Tirage au sort de la Phase Finale")
+                    st.info("Une fois TOUS les matchs de poule terminés, faites votre tirage au sort physique et saisissez les rencontres ci-dessous. Seuls les 2 premiers de chaque poule sont sélectionnables.")
+                    
+                    # 1. On calcule les 2 premiers de chaque poule pour le tirage
+                    qualified_players = []
+                    for g in group_letters:
+                        # On isole les matchs et participants de cette poule
+                        g_matches = [m for m in matches if m["group_name"] == g]
+                        g_parts = [p for p in participants if p["group_name"] == g]
+                        
+                        temp_standings = {p["user_id"]: {"V": 0, "Diff": 0} for p in g_parts}
+                        
+                        # Recalcul des points pour cette poule
+                        for m in g_matches:
+                            if m["status"] == "completed":
+                                s1, s2 = m["score1"], m["score2"]
+                                p1, p2 = m["player1_id"], m["player2_id"]
+                                if p1 in temp_standings:
+                                    if s1 > s2: temp_standings[p1]["V"] += 1
+                                    temp_standings[p1]["Diff"] += (s1 - s2)
+                                if p2 in temp_standings:
+                                    if s2 > s1: temp_standings[p2]["V"] += 1
+                                    temp_standings[p2]["Diff"] += (s2 - s1)
+                                    
+                        # Tri par Victoires, puis par Différence
+                        sorted_uids = sorted(temp_standings.keys(), key=lambda uid: (temp_standings[uid]["V"], temp_standings[uid]["Diff"]), reverse=True)
+                        
+                        # On prend uniquement le Top 2 et on les ajoute aux qualifiés
+                        qualified_players.extend(sorted_uids[:2])
+                    
+                    # 2. On détermine le nombre de matchs du 1er tour
+                    nb_matches_r1 = 8 if "32" in selected_t["format"] else 16
+                    
+                    # 3. Préparation de la mémoire (session_state) pour les menus dynamiques
+                    # On n'utilise PAS de st.form pour que les listes se mettent à jour instantanément
+                    for i in range(nb_matches_r1):
+                        if f"r1_m{i}_p1_{selected_t['id']}" not in st.session_state:
+                            st.session_state[f"r1_m{i}_p1_{selected_t['id']}"] = None
+                        if f"r1_m{i}_p2_{selected_t['id']}" not in st.session_state:
+                            st.session_state[f"r1_m{i}_p2_{selected_t['id']}"] = None
+
+                    # Liste de tous les joueurs actuellement sélectionnés dans le tirage
+                    all_selected_in_draw = set()
+                    for i in range(nb_matches_r1):
+                        val_p1 = st.session_state.get(f"r1_m{i}_p1_{selected_t['id']}")
+                        val_p2 = st.session_state.get(f"r1_m{i}_p2_{selected_t['id']}")
+                        if val_p1: all_selected_in_draw.add(val_p1)
+                        if val_p2: all_selected_in_draw.add(val_p2)
+
+                    st.markdown("#### 🗺️ Cartographie de l'arbre")
+                    st.info("Utilisez ce plan pour savoir où placer vos joueurs. Par exemple, les vainqueurs du Match 1 et du Match 2 se croiseront au tour suivant.")
+                    
+                    st.markdown("#### 🗺️ Cartographie de l'arbre")
+                    st.info("Utilisez ce plan pour savoir où placer vos joueurs. Les vainqueurs se dirigent vers le centre.")
+                    
+                    # --- DESSIN DU SQUELETTE DE L'ARBRE ---
+                    with st.container(border=True):
+                        import math
+                        nb_matches_r1 = 8 if "32" in selected_t["format"] else 16
+                        total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
+                        is_double_elim = "double" in selected_t["format"]
+                        
+                        html_map = "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 10px; zoom: 0.85;'>"
+                        
+                        if is_double_elim:
+                            # --- DESIGN CLASSIQUE (De gauche à droite pour le Double Elim) ---
+                            html_map += "<div style='display: flex; flex-direction: row;'>"
+                            for r_num in range(1, total_rounds_wb + 1):
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 140px; margin-right: 15px;'>"
+                                html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
+                                
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                for m_num in range(1, expected_count + 1):
+                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
+                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    text_color = "white" if r_num == 1 else "#888"
+                                    html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 14px;'>Match {m_num}</strong></div>"
+                                html_map += "</div></div>"
+                            html_map += "</div>"
+                            
+                        else:
+                            # --- DESIGN PAPILLON / SYMÉTRIQUE (Pour le Single Elim) ---
+                            
+                            # 1. PARTIE GAUCHE (Première moitié des matchs)
+                            html_map += "<div style='display: flex; flex-direction: row;'>"
+                            for r_num in range(1, total_rounds_wb):
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 120px; margin: 0 10px;'>"
+                                html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
+                                
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                half_count = expected_count // 2
+                                
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                for m_num in range(1, half_count + 1):
+                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
+                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    text_color = "white" if r_num == 1 else "#888"
+                                    html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
+                                html_map += "</div></div>"
+                            html_map += "</div>"
+                            
+                            # 2. CENTRE (La Grande Finale)
+                            html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 140px; margin: 0 15px;'>"
+                            html_map += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px;'>👑 Finale</div>"
+                            html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                            html_map += f"<div style='background-color: rgba(255,215,0,0.1); border: 1px solid gold; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: white; font-size: 14px;'>Match 1</strong></div>"
+                            html_map += "</div></div>"
+
+                            # 3. PARTIE DROITE (Deuxième moitié des matchs en miroir)
+                            html_map += "<div style='display: flex; flex-direction: row-reverse;'>"
+                            for r_num in range(1, total_rounds_wb):
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 120px; margin: 0 10px;'>"
+                                html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
+                                
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                half_count = expected_count // 2
+                                
+                                html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                                for m_num in range(half_count + 1, expected_count + 1):
+                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
+                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    text_color = "white" if r_num == 1 else "#888"
+                                    html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
+                                html_map += "</div></div>"
+                            html_map += "</div>"
+                            
+                        html_map += "</div>"
+                        
+                        st.markdown(html_map, unsafe_allow_html=True)
+                    st.divider()
+
+                    # 4. Interface du Tirage
+                    selections = []
+                    cols = st.columns(2)
+                    
+                    for i in range(nb_matches_r1):
+                        col = cols[i % 2]
+                        with col.container(border=True):
+                            st.markdown(f"**Match {i+1}**")
+                            
+                            # Filtre dynamique J1 : Qualifiés - (Tous les sélectionnés - Celui actuellement dans la case)
+                            curr_p1 = st.session_state.get(f"r1_m{i}_p1_{selected_t['id']}")
+                            avail_p1 = [p for p in qualified_players if p not in all_selected_in_draw or p == curr_p1]
+                            
+                            p1 = st.selectbox(
+                                "Joueur 1", 
+                                options=avail_p1, 
+                                format_func=lambda x: all_users.get(x, "Sélectionner...") if x else "Sélectionner...", 
+                                index=avail_p1.index(curr_p1) if curr_p1 in avail_p1 else None,
+                                key=f"r1_m{i}_p1_{selected_t['id']}",
+                                placeholder="Sélectionner..."
+                            )
+                            
+                            # Filtre dynamique J2
+                            curr_p2 = st.session_state.get(f"r1_m{i}_p2_{selected_t['id']}")
+                            avail_p2 = [p for p in qualified_players if p not in all_selected_in_draw or p == curr_p2]
+                            
+                            p2 = st.selectbox(
+                                "Joueur 2", 
+                                options=avail_p2, 
+                                format_func=lambda x: all_users.get(x, "Sélectionner...") if x else "Sélectionner...", 
+                                index=avail_p2.index(curr_p2) if curr_p2 in avail_p2 else None,
+                                key=f"r1_m{i}_p2_{selected_t['id']}",
+                                placeholder="Sélectionner..."
+                            )
+                            selections.append((p1, p2))
+                            
+                    # 5. Bouton de validation final (Hors du formulaire)
+                    st.write("")
+                    if st.button("⚔️ Valider le Tirage et Lancer l'Arbre", type="primary"):
+                        if any(p1 is None or p2 is None for p1, p2 in selections):
+                            st.error("⚠️ Veuillez remplir tous les matchs du premier tour avec les qualifiés.")
+                        else:
+                            # Double vérification de sécurité au moment du clic
+                            flat_list = [p for pair in selections for p in pair]
+                            if len(flat_list) != len(set(flat_list)):
+                                st.error("⚠️ Erreur : Un joueur a été sélectionné plusieurs fois !")
+                            else:
+                                # TOUT EST BON ! On génère l'arbre.
+                                db.generate_bracket_matches(selected_t["id"], selections)
+                                
+                                # Nettoyage de la mémoire pour que les menus soient vierges au prochain tournoi
+                                for i in range(nb_matches_r1):
+                                    st.session_state.pop(f"r1_m{i}_p1_{selected_t['id']}", None)
+                                    st.session_state.pop(f"r1_m{i}_p2_{selected_t['id']}", None)
+                                    
+                                st.success("Tirage au sort validé ! Transition vers l'arbre final...")
+                                st.balloons()
+                                st.rerun()
+
+                # ==========================================
+                # PHASE : ARBRE FINAL (BRACKET)
+                # ==========================================
+                elif selected_t["status"] == "bracket":
+                    st.success("⚔️ Phase finale en cours !")
+                    
+                    matches = db.get_gt_matches(selected_t["id"], "bracket").data
+                    all_users = {p["id"]: p["username"] for p in db.get_leaderboard().data}
+                    
+                    if not matches:
+                        st.error("Aucun match d'arbre trouvé.")
+                    else:
+                        import math
+                        nb_matches_r1 = 8 if "32" in selected_t["format"] else 16
+                        total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
+                        
+                        is_double_elim = "double" in selected_t["format"]
+
+                        # Fonction interne pour dessiner un "étage" de l'arbre
+                        # Ajout de start_round et end_round pour cibler exactement ce qu'on veut dessiner
+                        def draw_bracket_tier(prefix, title, start_round, end_round):
+                            st.markdown(f"### {title}")
+                            tier_matches = [m for m in matches if m["bracket_match_id"].startswith(prefix)]
+                            tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
+
+                            num_cols = end_round - start_round + 1
+                            cols = st.columns(num_cols)
+                            
+                            for r_idx, col in enumerate(cols):
+                                r_num = start_round + r_idx
+                                col.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                
+                                # Calcul du nombre de boîtes à dessiner (max(1, ...) empêche d'avoir 0 match en finale)
+                                if prefix == "WB":
+                                    expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                else:
+                                    expected_count = max(1, nb_matches_r1 // (2 ** math.ceil(r_num / 2)))
+                                
+                                for m_num in range(1, expected_count + 1):
+                                    b_id = f"{prefix}_R{r_num}_M{m_num}"
+                                    m = tier_dict.get(b_id)
+                                    
+                                    bg_color = "background: rgba(255, 215, 0, 0.1);" if (prefix=="WB" and r_num > total_rounds_wb) else ""
+
+                                    with col.container(border=True):
+                                        st.markdown(f"<div style='text-align:center; font-size:10px; opacity:0.5; {bg_color}'>Match {m_num}</div>", unsafe_allow_html=True)
+                                        
+                                        if m:
+                                            p1_name = all_users.get(m.get("player1_id"), "En attente...") if m.get("player1_id") else "En attente..."
+                                            p2_name = all_users.get(m.get("player2_id"), "En attente...") if m.get("player2_id") else "En attente..."
+                                            is_done = m["status"] == "completed"
+                                            
+                                            st.write(f"**{p1_name}**")
+                                            st.write(f"**{p2_name}**")
+                                            
+                                            if p1_name != "En attente..." and p2_name != "En attente...":
+                                                sc1, sc2 = st.columns(2)
+                                                s1 = sc1.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"b_s1_{m['id']}", label_visibility="collapsed")
+                                                s2 = sc2.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"b_s2_{m['id']}", label_visibility="collapsed")
+                                                
+                                                btn_lbl = "MAJ" if is_done else "Valider"
+                                                if st.button(btn_lbl, key=f"b_btn_{m['id']}", use_container_width=True):
+                                                    if s1 == s2:
+                                                        st.error("Il faut un vainqueur !")
+                                                    else:
+                                                        db.update_bracket_match_score(m["id"], s1, s2, m["player1_id"], m["player2_id"], selected_t["id"], m["bracket_match_id"], nb_matches_r1, selected_t["format"])
+                                                        st.rerun()
+                                        else:
+                                            st.write("**En attente...**")
+                                            st.write("**En attente...**")
+
+                        # --- DESSIN DE L'ARBRE PRINCIPAL ---
+                        draw_bracket_tier("WB", "🏆 Winner Bracket", 1, total_rounds_wb)
+                        
+                        # --- DESSIN DU LOSER BRACKET (Si activé) ---
+                        if is_double_elim:
+                            st.divider()
+                            total_rounds_lb = (total_rounds_wb - 1) * 2
+                            draw_bracket_tier("LB", "💀 Loser Bracket (Repêchages)", 1, total_rounds_lb)
+
+                        # --- LA GRANDE FINALE (Et l'éventuel Bracket Reset) ---
+                        if is_double_elim:
+                            st.divider()
+                            # On regarde si la base de données a été obligée de créer le "Bracket Reset"
+                            has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches)
+                            end_round = total_rounds_wb + 2 if has_reset else total_rounds_wb + 1
+                            
+                            title = "👑 Grande Finale & Bracket Reset" if has_reset else "👑 Grande Finale"
+                            draw_bracket_tier("WB", title, total_rounds_wb + 1, end_round)
+
+                    # 4. Le Bouton de Fin de Tournoi
+                    st.divider()
+                    st.info("Une fois la Grande Finale jouée et validée, vous pourrez clôturer l'événement.")
+                    if st.button("🏆 Clôturer le Tournoi (Archiver)", type="primary"):
+                        db.update_tournament_status(selected_t["id"], "completed")
+                        st.success("Tournoi terminé et archivé !")
+                        st.balloons()
+                        st.rerun()
+                        st.rerun()
+
+                elif selected_t["status"] == "completed":
+                    st.success("🏁 Ce tournoi est terminé et archivé.")
+                    st.info("Le système de distribution des médailles pour le Top 3 sera connecté ici prochainement !")
+                
 
 elif page == "⚙️ Paramètres":
     st.header("⚙️ Paramètres de confidentialité")

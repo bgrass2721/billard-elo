@@ -369,3 +369,296 @@ class DBManager:
             return True, "Préférences mises à jour !"
         except Exception as e:
             return False, str(e)
+
+    # =========================================================
+    # MODULE GRAND TOURNOI
+    # =========================================================
+
+    def create_grand_tournament(self, name, format_type):
+        """Crée un nouveau tournoi (Statut: Draft)"""
+        try:
+            res = self.supabase.table("grand_tournaments").insert({
+                "name": name,
+                "format": format_type,
+                "status": "draft"
+            }).execute()
+            return True, res.data[0]
+        except Exception as e:
+            return False, f"Erreur de création : {e}"
+
+    def get_grand_tournaments(self):
+        """Récupère tous les tournois triés par date de création"""
+        return self.supabase.table("grand_tournaments").select("*").order("created_at", desc=True).execute()
+
+    def get_tournament_participants(self, tournament_id):
+        """Récupère les inscrits actuels d'un tournoi avec leur pseudo"""
+        return (
+            self.supabase.table("gt_participants")
+            .select("*, profiles(username)")
+            .eq("tournament_id", tournament_id)
+            .execute()
+        )
+
+    def save_tournament_groups(self, tournament_id, groups_data):
+        """Met à jour les poules (écrase les anciens inscrits et sauvegarde les nouveaux)"""
+        try:
+            # 1. On supprime proprement les anciens participants de ce tournoi
+            self.supabase.table("gt_participants").delete().eq("tournament_id", tournament_id).execute()
+            
+            # 2. On insère la nouvelle configuration
+            if groups_data:
+                for row in groups_data:
+                    row['tournament_id'] = tournament_id
+                self.supabase.table("gt_participants").insert(groups_data).execute()
+                
+            return True, "✅ Poules sauvegardées avec succès !"
+        except Exception as e:
+            return False, f"Erreur lors de la sauvegarde : {e}"
+
+    def update_tournament_status(self, tournament_id, new_status):
+        """Passe le tournoi de brouillon à 'groups' ou 'bracket'"""
+        try:
+            self.supabase.table("grand_tournaments").update({"status": new_status}).eq("id", tournament_id).execute()
+            return True
+        except:
+            return False
+
+    def generate_group_matches(self, tournament_id):
+        """Génère tous les matchs de poule (Round-Robin)"""
+        # 1. On récupère les participants
+        parts = self.get_tournament_participants(tournament_id).data
+        
+        # 2. On les regroupe par poule
+        groups = {}
+        for p in parts:
+            g = p['group_name']
+            if g not in groups:
+                groups[g] = []
+            groups[g].append(p['user_id'])
+            
+        # 3. On crée les affrontements possibles (Combinaisons)
+        import itertools
+        matches_to_insert = []
+        for g, users in groups.items():
+            pairs = list(itertools.combinations(users, 2))
+            for pair in pairs:
+                matches_to_insert.append({
+                    "tournament_id": tournament_id,
+                    "phase": "group",
+                    "group_name": g,
+                    "player1_id": pair[0],
+                    "player2_id": pair[1],
+                    "status": "pending"
+                })
+                
+        # 4. On insère tout d'un coup dans la base
+        if matches_to_insert:
+            self.supabase.table("gt_matches").insert(matches_to_insert).execute()
+            
+        # 5. On passe le tournoi au statut "groups"
+        self.update_tournament_status(tournament_id, "groups")
+        return True
+
+    def get_gt_matches(self, tournament_id, phase="group"):
+        """Récupère les matchs d'un tournoi selon la phase"""
+        return (
+            self.supabase.table("gt_matches")
+            .select("*")
+            .eq("tournament_id", tournament_id)
+            .eq("phase", phase)
+            .execute()
+        )
+
+    def update_gt_match_score(self, match_id, score1, score2, p1_id, p2_id):
+        """Met à jour le score d'un match de tournoi et désigne le vainqueur."""
+        try:
+            print(f"\n--- 🔎 TENTATIVE DE SAISIE DE SCORE ---")
+            print(f"Match ID ciblé : {match_id}")
+            print(f"Joueur 1 ({p1_id}) vs Joueur 2 ({p2_id})")
+            print(f"Scores à envoyer : {score1} à {score2}")
+            
+            winner_id = p1_id if score1 > score2 else p2_id
+            loser_id = p2_id if score1 > score2 else p1_id
+            
+            data = {
+                "score1": score1,
+                "score2": score2,
+                "winner_id": winner_id,
+                "loser_id": loser_id,
+                "status": "completed"
+            }
+            print(f"Données préparées : {data}")
+            
+            # On exécute la requête
+            res = self.supabase.table("gt_matches").update(data).eq("id", match_id).execute()
+            
+            # On affiche EXACTEMENT ce que Supabase répond
+            print(f"✅ RÉPONSE SUPABASE : {res}")
+            print("---------------------------------------\n")
+            
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ ERREUR CATCHÉE : {str(e)}\n")
+            return False
+    
+    def generate_bracket_matches(self, tournament_id, matchups):
+        """
+        Crée le premier tour de l'arbre final (Winner Bracket) à partir du tirage au sort manuel.
+        matchups est une liste de tuples : [(joueur1_id, joueur2_id), ...]
+        """
+        matches_to_insert = []
+        
+        for i, pair in enumerate(matchups):
+            # On crée un identifiant unique pour l'arbre. Ex: WB_R1_M1 (Winner Bracket, Round 1, Match 1)
+            bracket_id = f"WB_R1_M{i+1}" 
+            
+            matches_to_insert.append({
+                "tournament_id": tournament_id,
+                "phase": "bracket",
+                "bracket_match_id": bracket_id,
+                "player1_id": pair[0],
+                "player2_id": pair[1],
+                "status": "pending"
+            })
+            
+        if matches_to_insert:
+            self.supabase.table("gt_matches").insert(matches_to_insert).execute()
+            
+        # On passe le tournoi en phase finale !
+        self.update_tournament_status(tournament_id, "bracket")
+        return True
+
+    def update_bracket_match_score(self, match_id, score1, score2, p1_id, p2_id, tournament_id, bracket_id, total_r1_matches, format_type):
+        """Met à jour un match d'arbre et propulse le gagnant (et le perdant si LB activé)"""
+        import math
+        
+        winner_id = p1_id if score1 > score2 else (p2_id if score2 > score1 else None)
+        loser_id = p2_id if score1 > score2 else (p1_id if score2 > score1 else None)
+        status = "completed" if winner_id else "pending"
+
+        self.supabase.table("gt_matches").update({
+            "score1": score1, "score2": score2, "winner_id": winner_id, "loser_id": loser_id, "status": status
+        }).eq("id", match_id).execute()
+
+        if winner_id:
+            parts = bracket_id.split('_')
+            bracket_type = parts[0]
+            r_num = int(parts[1].replace('R', ''))
+            m_num = int(parts[2].replace('M', ''))
+
+            total_rounds_wb = int(math.log2(total_r1_matches)) + 1
+
+            def push_player_to_next_match(player_id, next_b_id, is_p1):
+                existing = self.supabase.table("gt_matches").select("*").eq("tournament_id", tournament_id).eq("bracket_match_id", next_b_id).execute().data
+                if existing:
+                    update_data = {"player1_id": player_id} if is_p1 else {"player2_id": player_id}
+                    self.supabase.table("gt_matches").update(update_data).eq("id", existing[0]["id"]).execute()
+                else:
+                    insert_data = {
+                        "tournament_id": tournament_id, "phase": "bracket", "bracket_match_id": next_b_id,
+                        "player1_id": player_id if is_p1 else None, "player2_id": player_id if not is_p1 else None,
+                        "status": "pending"
+                    }
+                    self.supabase.table("gt_matches").insert(insert_data).execute()
+
+            # --- A. WINNER BRACKET ---
+            if bracket_type == "WB":
+                # Gagnant
+                if r_num < total_rounds_wb:
+                    next_r = r_num + 1
+                    next_m = math.ceil(m_num / 2)
+                    push_player_to_next_match(winner_id, f"WB_R{next_r}_M{next_m}", is_p1=(m_num % 2 != 0))
+                elif "double" in format_type and r_num == total_rounds_wb:
+                    # Le grand vainqueur du WB file en Grande Finale
+                    push_player_to_next_match(winner_id, f"WB_R{total_rounds_wb + 1}_M1", is_p1=True)
+                elif "double" in format_type and r_num == total_rounds_wb + 1:
+                    # ⚠️ NOUVEAU : LE BRACKET RESET
+                    # Si le Joueur 2 (qui vient du Loser Bracket) gagne la Grande Finale, on rejoue un match !
+                    if winner_id == p2_id:
+                        push_player_to_next_match(p1_id, f"WB_R{total_rounds_wb + 2}_M1", is_p1=True)
+                        push_player_to_next_match(p2_id, f"WB_R{total_rounds_wb + 2}_M1", is_p1=False)
+
+                # Perdant (Repêchages pour un format 16 qualifiés)
+                if "double" in format_type and total_r1_matches == 8:
+                    if r_num == 1:
+                        # Tour 1 : Les 2 perdants d'un même quart de tableau se rencontrent (Normal)
+                        push_player_to_next_match(loser_id, f"LB_R1_M{math.ceil(m_num / 2)}", is_p1=(m_num % 2 != 0))
+                    elif r_num == 2:
+                        # ⚠️ LE CROISEMENT (ANTI-REMATCH) ⚠️
+                        # On inverse l'ordre d'arrivée : 1 va en 4, 2 va en 3, 3 va en 2, 4 va en 1.
+                        lb_m = 5 - m_num 
+                        push_player_to_next_match(loser_id, f"LB_R2_M{lb_m}", is_p1=False)
+                    elif r_num == 3: 
+                        # Tour 3 : Pas besoin de croiser, le brassage a déjà été fait au tour d'avant
+                        push_player_to_next_match(loser_id, f"LB_R4_M{m_num}", is_p1=False)
+                    elif r_num == 4: 
+                        # Perdant de la Finale WB -> LB Tour 6
+                        push_player_to_next_match(loser_id, f"LB_R6_M1", is_p1=False)
+
+            # --- B. LOSER BRACKET ---
+            elif bracket_type == "LB" and "double" in format_type:
+                if total_r1_matches == 8:
+                    if r_num == 1:
+                        push_player_to_next_match(winner_id, f"LB_R2_M{m_num}", is_p1=True)
+                    elif r_num == 2:
+                        push_player_to_next_match(winner_id, f"LB_R3_M{math.ceil(m_num / 2)}", is_p1=(m_num % 2 != 0))
+                    elif r_num == 3:
+                        push_player_to_next_match(winner_id, f"LB_R4_M{m_num}", is_p1=True)
+                    elif r_num == 4:
+                        push_player_to_next_match(winner_id, f"LB_R5_M{math.ceil(m_num / 2)}", is_p1=(m_num % 2 != 0))
+                    elif r_num == 5:
+                        push_player_to_next_match(winner_id, f"LB_R6_M1", is_p1=True)
+                    elif r_num == 6:
+                        # Vainqueur de la finale du Loser -> Retour en Grande Finale contre l'invaincu !
+                        push_player_to_next_match(winner_id, f"WB_R5_M1", is_p1=False)
+
+        return True
+
+    def create_ghost_player(self, username):
+            """Crée un profil fantôme pour les archives sans compte de connexion."""
+            import uuid
+            # On génère un faux identifiant unique pour ce joueur
+            ghost_id = str(uuid.uuid4())
+            
+            try:
+                # On tente d'insérer le fantôme directement dans les profils
+                data = {
+                    "id": ghost_id,
+                    "username": username,
+                    "is_admin": False,
+                    "is_ghost": True
+                }
+                self.supabase.table("profiles").insert(data).execute()
+                return True, f"Le joueur fantôme '{username}' a été créé avec succès !"
+                
+            except Exception as e:
+                error_str = str(e)
+                # On anticipe le blocage de sécurité classique de Supabase
+                if "foreign key constraint" in error_str.lower() or "23503" in error_str:
+                    return False, "Supabase a bloqué la création (Sécurité auth.users). Donnez-moi ce message d'erreur et je vous fournirai le code SQL pour autoriser les fantômes !"
+                return False, f"Erreur inattendue : {error_str}"
+    
+    def get_all_profiles(self):
+        """Récupère absolument tous les profils enregistrés."""
+        # <-- NOUVEAU : On demande à récupérer la colonne is_ghost
+        return self.supabase.table("profiles").select("id, username, is_ghost").execute()
+
+    def merge_ghost_to_real(self, ghost_id, real_id):
+        """Transfère tout l'historique d'un fantôme vers un vrai joueur, puis supprime le fantôme."""
+        try:
+            # 1. Mise à jour de la présence dans les tournois (Participants)
+            self.supabase.table("gt_participants").update({"user_id": real_id}).eq("user_id", ghost_id).execute()
+
+            # 2. Mise à jour des matchs de tournoi (J1, J2, Vainqueur, Perdant)
+            self.supabase.table("gt_matches").update({"player1_id": real_id}).eq("player1_id", ghost_id).execute()
+            self.supabase.table("gt_matches").update({"player2_id": real_id}).eq("player2_id", ghost_id).execute()
+            self.supabase.table("gt_matches").update({"winner_id": real_id}).eq("winner_id", ghost_id).execute()
+            self.supabase.table("gt_matches").update({"loser_id": real_id}).eq("loser_id", ghost_id).execute()
+
+            # 3. Nettoyage : Suppression définitive du profil fantôme
+            self.supabase.table("profiles").delete().eq("id", ghost_id).execute()
+
+            return True, "Fusion réussie ! Le joueur a récupéré tout son historique."
+        except Exception as e:
+            return False, f"Erreur lors de la fusion : {str(e)}"
