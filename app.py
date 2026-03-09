@@ -1705,7 +1705,7 @@ elif page == "🏟️ Grand Tournoi":
     is_admin = user.get("is_admin", False)
     
     if is_admin:
-        tab_spectator, tab_admin = st.tabs(["👁️ Vue Spectateur", "🛠️ Panel Admin Tournoi"])
+        tab_spectator, tab_admin = st.tabs(["Historique des tournois", "🛠️ Panel Admin Tournoi"])
     else:
         tab_spectator = st.container() # Le joueur normal ne voit que ça
         
