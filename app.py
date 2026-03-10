@@ -1160,6 +1160,11 @@ elif page == "🆚 Comparateur de joueurs":
         st.warning("Veuillez sélectionner deux joueurs différents.")
         st.stop()
 
+    player_1 = players_map[p1_name]
+    player_2 = players_map[p2_name]
+    id_1 = player_1["id"]
+    id_2 = player_2["id"]
+    
     # 3. SÉLECTEUR DE MODE
     st.write("")
     hist_mode = st.radio(
