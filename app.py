@@ -1818,7 +1818,9 @@ elif page == "🏟️ Grand Tournoi":
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
                             
-                            bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else ("rgba(205, 127, 50, 0.05)" if is_pf else "#1E1E28")
+                            # On force le fond sombre pour tout le monde
+                            bg_color = "#1E1E28"
+                            # Bordure dorée pour la GF, bronze pour la PF, grise pour les autres
                             border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
                             
                             c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
@@ -1830,17 +1832,28 @@ elif page == "🏟️ Grand Tournoi":
                                 s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                 
                                 if m["status"] == "completed":
-                                    w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
-                                    w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                    c1 = "#4CAF50" if s1 > s2 else "#888"
-                                    c2 = "#4CAF50" if s2 > s1 else "#888"
+                                    # Définition des couleurs de médailles
+                                    c_win = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "white")
+                                    c_lose = "#C0C0C0" if is_gf else "#888" # Argent pour le perdant de la Finale !
+                                    
+                                    w1 = f"bold; color: {c_win};" if s1 > s2 else f"normal; color: {c_lose};"
+                                    w2 = f"bold; color: {c_win};" if s2 > s1 else f"normal; color: {c_lose};"
+                                    
+                                    # Le score du vainqueur prend aussi la couleur de sa médaille (ou vert classique)
+                                    c1_score = c_win if s1 > s2 else "#888"
+                                    c2_score = c_win if s2 > s1 else "#888"
+                                    
+                                    # (Exception pour les matchs normaux : on force le vert pour le score gagnant)
+                                    if not is_gf and not is_pf:
+                                        if s1 > s2: c1_score = "#4CAF50"
+                                        if s2 > s1: c2_score = "#4CAF50"
                                 else:
                                     w1 = w2 = "normal; color: white;"
-                                    c1 = c2 = "transparent"
+                                    c1_score = c2_score = "transparent"
                                     if p1 == "..." and p2 == "...": s1 = s2 = ""
                                     
-                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1}; font-weight: bold;'>{s1}</span></div>"
-                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2}; font-weight: bold;'>{s2}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
                             else:
                                 c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div>"
                                 c_html += "<div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
@@ -2373,11 +2386,12 @@ elif page == "🏟️ Grand Tournoi":
                                 tier_matches = [m for m in matches if m["bracket_match_id"].startswith(prefix)]
                                 tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
                                 
-                                def get_match_card_admin(r_num, m_num, is_gf=False):
+                                def get_match_card_admin(r_num, m_num, is_gf=False, is_pf=False):
                                     b_id = f"{prefix}_R{r_num}_M{m_num}"
                                     m = tier_dict.get(b_id)
-                                    bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else "#1E1E28"
-                                    border_color = "#FFD700" if is_gf else "#444"
+                                    
+                                    bg_color = "#1E1E28"
+                                    border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
                                     
                                     c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
                                     c_html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
@@ -2388,19 +2402,28 @@ elif page == "🏟️ Grand Tournoi":
                                         s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                         
                                         if m["status"] == "completed":
-                                            w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
-                                            w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                            c1 = "#4CAF50" if s1 > s2 else "transparent"
-                                            c2 = "#4CAF50" if s2 > s1 else "transparent"
+                                            c_win = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "white")
+                                            c_lose = "#C0C0C0" if is_gf else "#888"
+                                            
+                                            w1 = f"bold; color: {c_win};" if s1 > s2 else f"normal; color: {c_lose};"
+                                            w2 = f"bold; color: {c_win};" if s2 > s1 else f"normal; color: {c_lose};"
+                                            
+                                            c1_score = c_win if s1 > s2 else "transparent"
+                                            c2_score = c_win if s2 > s1 else "transparent"
+                                            
+                                            if not is_gf and not is_pf:
+                                                if s1 > s2: c1_score = "#4CAF50"
+                                                if s2 > s1: c2_score = "#4CAF50"
                                         else:
                                             w1 = w2 = "normal; color: white;"
-                                            c1 = c2 = "transparent"
+                                            c1_score = c2_score = "transparent"
                                             if p1 == "..." and p2 == "...": s1 = s2 = ""
                                             
-                                        c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p1}</span><span style='color: {c1}; font-weight: bold;'>{s1}</span></div>"
-                                        c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p2}</span><span style='color: {c2}; font-weight: bold;'>{s2}</span></div>"
+                                        c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
+                                        c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
                                     else:
                                         c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
+                                    
                                     c_html += "</div>"
                                     return c_html
 
