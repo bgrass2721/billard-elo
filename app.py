@@ -406,7 +406,6 @@ if st.session_state.user_data is None and not st.session_state.logout_clicked:
                 st.session_state.user_data = user_profile.data
     except Exception:
         pass
-
 # --- ÉCRAN DE CONNEXION / INSCRIPTION ---
 if st.session_state.user_data is None:
     st.title("🎱 BlackBall Compétition")
@@ -457,11 +456,22 @@ if st.session_state.user_data is None:
                     st.error("Identifiants incorrects ou erreur technique.")
 
                 # 2. Le redémarrage se fait EN DEHORS du try/except
-                # Cela empêche le message rouge d'apparaître en même temps que le vert
                 if auth_success:
                     st.session_state.logout_clicked = False
                     st.success("Connexion réussie !")
                     st.rerun()
+                    
+        # --- NOUVEAU : BOUTON VISITEUR ---
+        st.write("---")
+        if st.button("👁️ Entrer sans compte (Mode Visiteur)"):
+            # On crée un "faux" profil directement dans la mémoire
+            st.session_state.user_data = {
+                "id": "guest",
+                "username": "Visiteur",
+                "role": "guest"
+            }
+            st.session_state.guest_mode = True
+            st.rerun()
 
     with tab2:
         st.info("⚠️ Un code d'invitation est requis pour s'inscrire.")
@@ -492,11 +502,16 @@ if st.session_state.user_data is None:
 
 # --- SI CONNECTÉ : SYNCHRONISATION DES INFOS ---
 current_id = st.session_state.user_data["id"]
-fresh_user = (
-    db.supabase.table("profiles").select("*").eq("id", current_id).single().execute()
-)
-user = fresh_user.data
-st.session_state.user_data = user
+
+# On vérifie si c'est le visiteur avant d'interroger la base de données !
+if current_id != "guest":
+    fresh_user = (
+        db.supabase.table("profiles").select("*").eq("id", current_id).single().execute()
+    )
+    user = fresh_user.data
+    st.session_state.user_data = user
+else:
+    user = st.session_state.user_data
 
 # --- CALCUL DES RANGS (1v1 et 2v2) ---
 
@@ -654,8 +669,18 @@ elif page == "👤 Profils Joueurs":
 
     # Menu déroulant
     options = list(players_map.keys())
+    
+    # 🛑 GESTION DU MODE VISITEUR 🛑
+    is_guest = st.session_state.get("guest_mode", False)
+    
     try:
-        default_index = options.index(user["username"])
+        if is_guest and len(all_players) > 0:
+            # Si c'est un visiteur, on sélectionne le N°1 du classement (le premier de all_players)
+            default_username = all_players[0]["username"]
+            default_index = options.index(default_username)
+        else:
+            # Sinon, on sélectionne le joueur connecté
+            default_index = options.index(user["username"])
     except ValueError:
         default_index = 0
 
@@ -665,7 +690,8 @@ elif page == "👤 Profils Joueurs":
     target_user = players_map[selected_username]
 
     # --- SÉCURITÉ : BLOCAGE SI PROFIL PRIVÉ ---
-    if target_user.get("is_hidden_profile", False) and target_user["id"] != user["id"]:
+    # Un visiteur ne peut jamais voir un profil privé !
+    if target_user.get("is_hidden_profile", False) and (is_guest or target_user["id"] != user["id"]):
         st.warning(f"🔒 Le profil de {target_user['username']} est privé.")
         st.info("L'utilisateur a choisi de masquer ses statistiques et son historique.")
         st.stop()
@@ -891,171 +917,188 @@ elif page == "👤 Profils Joueurs":
 
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Déclarer un résultat")
-
-    # 1. Choix du mode de jeu
-    mode_input = st.radio("Type de match", ["👤 1 vs 1", "👥 2 vs 2"], horizontal=True)
-
-    # Récupération de la liste des joueurs (sauf moi-même)
-    players_res = db.get_leaderboard()
-    # On gère le cas où la liste est vide ou None
-    all_players = players_res.data if players_res.data else []
-    adv_map = {p["username"]: p["id"] for p in all_players if p["id"] != user["id"]}
-
-    if not adv_map:
-        st.warning("Il n'y a pas assez de joueurs inscrits pour déclarer un match.")
+    
+    # 🛑 VÉRIFICATION DU MODE VISITEUR 🛑
+    is_guest = st.session_state.get("guest_mode", False)
+    
+    if is_guest:
+        # Message pour le visiteur
+        st.warning("🔒 Accès restreint")
+        st.write("Vous êtes actuellement en Mode Visiteur. Vous devez créer un compte pour pouvoir déclarer vos matchs et participer au classement officiel.")
+        
+        # Un petit bouton pour les inviter à se déconnecter du mode visiteur
+        if st.button("Se déconnecter et créer un compte"):
+            st.session_state.user_data = None
+            st.session_state.guest_mode = False
+            st.rerun()
+            
     else:
-        with st.form("match_form"):
-            # --- INTERFACE 1 vs 1 ---
-            if mode_input == "👤 1 vs 1":
-                adv_nom = st.selectbox(
-                    "J'ai gagné contre :",
-                    list(adv_map.keys()),
-                    index=None,
-                    placeholder="Choisir un adversaire...",
-                )
-                # On met les autres à None pour éviter les erreurs de variables
-                partner_nom = None
-                adv2_nom = None
+        # ✅ LE CODE NORMAL POUR LES VRAIS JOUEURS ✅
+        
+        # 1. Choix du mode de jeu
+        mode_input = st.radio("Type de match", ["👤 1 vs 1", "👥 2 vs 2"], horizontal=True)
 
-            # --- INTERFACE 2 vs 2 ---
-            else:
-                c1, c2 = st.columns(2)
-                # Mon coéquipier
-                partner_nom = c1.selectbox(
-                    "Mon coéquipier :",
-                    list(adv_map.keys()),
-                    index=None,
-                    placeholder="Qui était avec toi ?",
-                )
+        # Récupération de la liste des joueurs (sauf moi-même)
+        players_res = db.get_leaderboard()
+        # On gère le cas où la liste est vide ou None
+        all_players = players_res.data if players_res.data else []
+        adv_map = {p["username"]: p["id"] for p in all_players if p["id"] != user["id"]}
 
-                # Les adversaires
-                adv_nom = c2.selectbox(
-                    "Adversaire 1 :",
-                    list(adv_map.keys()),
-                    index=None,
-                    placeholder="Adversaire 1",
-                )
-                adv2_nom = c2.selectbox(
-                    "Adversaire 2 :",
-                    list(adv_map.keys()),
-                    index=None,
-                    placeholder="Adversaire 2",
-                )
-
-            submitted = st.form_submit_button("Envoyer pour validation")
-
-            if submitted:
-                # ==========================================
-                # LOGIQUE DE VALIDATION ET ENVOI
-                # ==========================================
-
-                # CAS 1 : MODE 1 vs 1
+        if not adv_map:
+            st.warning("Il n'y a pas assez de joueurs inscrits pour déclarer un match.")
+        else:
+            with st.form("match_form"):
+                # --- INTERFACE 1 vs 1 ---
                 if mode_input == "👤 1 vs 1":
-                    # Sécurité : Champ vide
-                    if adv_nom is None:
-                        st.error("⚠️ Vous devez sélectionner un adversaire !")
-                        st.stop()
-
-                    # Sécurité : Anti-Spam (Vérifier si match déjà en attente)
-                    opponent_id = adv_map[adv_nom]
-                    existing = (
-                        db.supabase.table("matches")
-                        .select("*")
-                        .eq("winner_id", user["id"])
-                        .eq("loser_id", opponent_id)
-                        .eq("status", "pending")
-                        .execute()
+                    adv_nom = st.selectbox(
+                        "J'ai gagné contre :",
+                        list(adv_map.keys()),
+                        index=None,
+                        placeholder="Choisir un adversaire...",
                     )
+                    # On met les autres à None pour éviter les erreurs de variables
+                    partner_nom = None
+                    adv2_nom = None
 
-                    if existing.data:
-                        st.warning(
-                            "Un match contre ce joueur est déjà en attente de validation."
-                        )
-                        st.stop()
-
-                    # Envoi 1v1
-                    db.declare_match(user["id"], opponent_id, user["id"], mode="1v1")
-
-                # CAS 2 : MODE 2 vs 2
+                # --- INTERFACE 2 vs 2 ---
                 else:
-                    # Sécurité : Champs vides
-                    if not (partner_nom and adv_nom and adv2_nom):
-                        st.error("⚠️ Veuillez remplir les 3 autres joueurs !")
-                        st.stop()
-
-                    # Sécurité : Doublons (ex: Paul partenaire ET adversaire)
-                    # On utilise un 'set' pour compter les joueurs uniques
-                    selected_players = {partner_nom, adv_nom, adv2_nom}
-                    if len(selected_players) < 3:
-                        st.error("⚠️ Un joueur ne peut pas être sélectionné deux fois.")
-                        st.stop()
-
-                    # Envoi 2v2
-                    db.declare_match(
-                        winner_id=user["id"],
-                        loser_id=adv_map[adv_nom],
-                        created_by_id=user["id"],
-                        winner2_id=adv_map[partner_nom],
-                        loser2_id=adv_map[adv2_nom],
-                        mode="2v2",
+                    c1, c2 = st.columns(2)
+                    # Mon coéquipier
+                    partner_nom = c1.selectbox(
+                        "Mon coéquipier :",
+                        list(adv_map.keys()),
+                        index=None,
+                        placeholder="Qui était avec toi ?",
                     )
 
-                st.success("Match envoyé avec succès ! 🚀")
-                st.balloons()
+                    # Les adversaires
+                    adv_nom = c2.selectbox(
+                        "Adversaire 1 :",
+                        list(adv_map.keys()),
+                        index=None,
+                        placeholder="Adversaire 1",
+                    )
+                    adv2_nom = c2.selectbox(
+                        "Adversaire 2 :",
+                        list(adv_map.keys()),
+                        index=None,
+                        placeholder="Adversaire 2",
+                    )
 
-    # --- SECTION BAS DE PAGE : HISTORIQUE DES DÉCLARATIONS ---
-    st.divider()
-    st.subheader("Mes déclarations récentes")
+                submitted = st.form_submit_button("Envoyer pour validation")
 
-    # On récupère mes victoires récentes pour voir les statuts
-    my_wins = (
-        db.supabase.table("matches")
-        .select("*, profiles!loser_id(username)")  # On récupère le nom du perdant 1
-        .eq("created_by", user["id"])  # On filtre sur ceux que J'AI créés
-        .order("created_at", desc=True)
-        .limit(5)
-        .execute()
-        .data
-    )
+                if submitted:
+                    # ==========================================
+                    # LOGIQUE DE VALIDATION ET ENVOI
+                    # ==========================================
 
-    if not my_wins:
-        st.info("Aucune déclaration récente.")
-    else:
-        for w in my_wins:
-            status = w["status"]
-            # Petit trick pour récupérer le nom : en 2v2 c'est parfois plus complexe,
-            # mais on affiche au moins le perdant principal pour se repérer.
-            adv = w.get("profiles", {}).get("username", "Inconnu")
-            mode_display = " (2v2)" if w.get("mode") == "2v2" else ""
+                    # CAS 1 : MODE 1 vs 1
+                    if mode_input == "👤 1 vs 1":
+                        # Sécurité : Champ vide
+                        if adv_nom is None:
+                            st.error("⚠️ Vous devez sélectionner un adversaire !")
+                            st.stop()
 
-            with st.container(border=True):
-                c1, c2 = st.columns([3, 1])
-                c1.write(f"**VS {adv}** {mode_display}")
+                        # Sécurité : Anti-Spam (Vérifier si match déjà en attente)
+                        opponent_id = adv_map[adv_nom]
+                        existing = (
+                            db.supabase.table("matches")
+                            .select("*")
+                            .eq("winner_id", user["id"])
+                            .eq("loser_id", opponent_id)
+                            .eq("status", "pending")
+                            .execute()
+                        )
 
-                if status == "pending":
-                    c2.info("⏳ En attente")
-                elif status == "validated":
-                    c2.success("✅ Validé")
+                        if existing.data:
+                            st.warning(
+                                "Un match contre ce joueur est déjà en attente de validation."
+                            )
+                            st.stop()
 
-                elif status == "rejected":
-                    c2.error("❌ Refusé")
-                    st.write("Votre adversaire a refusé ce match.")
-                    col_btn1, col_btn2 = st.columns(2)
-                    if col_btn1.button(
-                        "Accepter le rejet (Supprimer)", key=f"acc_{w['id']}"
-                    ):
-                        db.accept_rejection(w["id"])
-                        st.rerun()
-                    if col_btn2.button("Contester (Litige)", key=f"disp_{w['id']}"):
-                        db.dispute_match(w["id"])
-                        st.rerun()
+                        # Envoi 1v1
+                        db.declare_match(user["id"], opponent_id, user["id"], mode="1v1")
 
-                elif status == "disputed":
-                    c2.warning("⚖️ Litige")
-                    st.caption("Un administrateur va trancher.")
+                    # CAS 2 : MODE 2 vs 2
+                    else:
+                        # Sécurité : Champs vides
+                        if not (partner_nom and adv_nom and adv2_nom):
+                            st.error("⚠️ Veuillez remplir les 3 autres joueurs !")
+                            st.stop()
 
-                elif status == "rejected_confirmed":
-                    c2.write("🗑️ Supprimé")
+                        # Sécurité : Doublons (ex: Paul partenaire ET adversaire)
+                        # On utilise un 'set' pour compter les joueurs uniques
+                        selected_players = {partner_nom, adv_nom, adv2_nom}
+                        if len(selected_players) < 3:
+                            st.error("⚠️ Un joueur ne peut pas être sélectionné deux fois.")
+                            st.stop()
+
+                        # Envoi 2v2
+                        db.declare_match(
+                            winner_id=user["id"],
+                            loser_id=adv_map[adv_nom],
+                            created_by_id=user["id"],
+                            winner2_id=adv_map[partner_nom],
+                            loser2_id=adv_map[adv2_nom],
+                            mode="2v2",
+                        )
+
+                    st.success("Match envoyé avec succès ! 🚀")
+                    st.balloons()
+
+        # --- SECTION BAS DE PAGE : HISTORIQUE DES DÉCLARATIONS ---
+        st.divider()
+        st.subheader("Mes déclarations récentes")
+
+        # On récupère mes victoires récentes pour voir les statuts
+        my_wins = (
+            db.supabase.table("matches")
+            .select("*, profiles!loser_id(username)")  # On récupère le nom du perdant 1
+            .eq("created_by", user["id"])  # On filtre sur ceux que J'AI créés
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+            .data
+        )
+
+        if not my_wins:
+            st.info("Aucune déclaration récente.")
+        else:
+            for w in my_wins:
+                status = w["status"]
+                # Petit trick pour récupérer le nom : en 2v2 c'est parfois plus complexe,
+                # mais on affiche au moins le perdant principal pour se repérer.
+                adv = w.get("profiles", {}).get("username", "Inconnu")
+                mode_display = " (2v2)" if w.get("mode") == "2v2" else ""
+
+                with st.container(border=True):
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"**VS {adv}** {mode_display}")
+
+                    if status == "pending":
+                        c2.info("⏳ En attente")
+                    elif status == "validated":
+                        c2.success("✅ Validé")
+
+                    elif status == "rejected":
+                        c2.error("❌ Refusé")
+                        st.write("Votre adversaire a refusé ce match.")
+                        col_btn1, col_btn2 = st.columns(2)
+                        if col_btn1.button(
+                            "Accepter le rejet (Supprimer)", key=f"acc_{w['id']}"
+                        ):
+                            db.accept_rejection(w["id"])
+                            st.rerun()
+                        if col_btn2.button("Contester (Litige)", key=f"disp_{w['id']}"):
+                            db.dispute_match(w["id"])
+                            st.rerun()
+
+                    elif status == "disputed":
+                        c2.warning("⚖️ Litige")
+                        st.caption("Un administrateur va trancher.")
+
+                    elif status == "rejected_confirmed":
+                        c2.write("🗑️ Supprimé")
 
 elif page == "🆚 Comparateur de joueurs":
     st.header("⚔️ Comparateur")
@@ -1074,11 +1117,18 @@ elif page == "🆚 Comparateur de joueurs":
 
     # 2. SÉLECTEURS (Joueur A vs Joueur B)
     c1, c2, c3 = st.columns([1.5, 0.5, 1.5])
+    
+    # 🛑 GESTION DU MODE VISITEUR 🛑
+    is_guest = st.session_state.get("guest_mode", False)
 
     with c1:
         try:
-            default_ix_1 = player_names.index(user["username"])
-        except:
+            if is_guest and len(player_names) > 0:
+                # Si visiteur, on prend le premier de la liste (le N°1 du leaderboard)
+                default_ix_1 = 0 
+            else:
+                default_ix_1 = player_names.index(user["username"])
+        except ValueError:
             default_ix_1 = 0
         p1_name = st.selectbox("Joueur 1 (Gauche)", player_names, index=default_ix_1)
 
@@ -1089,19 +1139,26 @@ elif page == "🆚 Comparateur de joueurs":
         )
 
     with c3:
-        default_ix_2 = 1 if len(player_names) > 1 else 0
+        if is_guest and len(player_names) > 1:
+            # Si visiteur, on prend le N°2 du leaderboard (l'index 1)
+            default_ix_2 = 1
+        else:
+            default_ix_2 = 1 if len(player_names) > 1 else 0
+            
         if player_names[default_ix_2] == p1_name and len(player_names) > 1:
-            default_ix_2 = 0
+            # Sécurité si jamais le N°2 est le même nom que le N°1 (peu probable mais prudent)
+            # Ou si un vrai utilisateur est lui-même à l'index par défaut
+            # On cherche le premier joueur différent de Joueur 1
+            for i in range(len(player_names)):
+                if player_names[i] != p1_name:
+                    default_ix_2 = i
+                    break
+        
         p2_name = st.selectbox("Joueur 2 (Droite)", player_names, index=default_ix_2)
 
     if p1_name == p2_name:
         st.warning("Veuillez sélectionner deux joueurs différents.")
         st.stop()
-
-    player_1 = players_map[p1_name]
-    player_2 = players_map[p2_name]
-    id_1 = player_1["id"]
-    id_2 = player_2["id"]
 
     # 3. SÉLECTEUR DE MODE
     st.write("")
@@ -1396,23 +1453,40 @@ elif page == "🆚 Comparateur de joueurs":
 
 elif page == "📑 Mes validations":
     st.header("📑 Matchs à confirmer")
-    pending = db.get_pending_matches(user["id"]).data
-    if not pending:
-        st.write("Aucun match en attente.")
+    
+    # 🛑 VÉRIFICATION DU MODE VISITEUR 🛑
+    is_guest = st.session_state.get("guest_mode", False)
+    
+    if is_guest:
+        # Message pour le visiteur
+        st.warning("🔒 Accès restreint")
+        st.write("Vous êtes actuellement en Mode Visiteur. Vous devez créer un compte pour recevoir et valider des matchs.")
+        
+        # Bouton pour quitter le mode visiteur
+        if st.button("Se déconnecter et créer un compte", key="btn_guest_val"):
+            st.session_state.user_data = None
+            st.session_state.guest_mode = False
+            st.rerun()
+            
     else:
-        for m in pending:
-            winner_name = m.get("profiles", {}).get("username", "Un joueur")
-            with st.expander(f"Match contre {winner_name}", expanded=True):
-                col_val, col_ref = st.columns(2)
-                with col_val:
-                    if st.button("Confirmer la défaite ✅", key=f"val_{m['id']}"):
-                        success, msg = db.validate_match_logic(m["id"])
-                        if success:
+        # ✅ LE CODE NORMAL POUR LES VRAIS JOUEURS ✅
+        pending = db.get_pending_matches(user["id"]).data
+        if not pending:
+            st.write("Aucun match en attente.")
+        else:
+            for m in pending:
+                winner_name = m.get("profiles", {}).get("username", "Un joueur")
+                with st.expander(f"Match contre {winner_name}", expanded=True):
+                    col_val, col_ref = st.columns(2)
+                    with col_val:
+                        if st.button("Confirmer la défaite ✅", key=f"val_{m['id']}"):
+                            success, msg = db.validate_match_logic(m["id"])
+                            if success:
+                                st.rerun()
+                    with col_ref:
+                        if st.button("C'est une erreur ❌", key=f"ref_{m['id']}"):
+                            db.reject_match(m["id"])
                             st.rerun()
-                with col_ref:
-                    if st.button("C'est une erreur ❌", key=f"ref_{m['id']}"):
-                        db.reject_match(m["id"])
-                        st.rerun()
 
 elif page == "📢 Nouveautés":
     st.header("📢 Nouveautés & Mises à jour")
