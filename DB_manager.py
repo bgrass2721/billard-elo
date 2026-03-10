@@ -548,7 +548,7 @@ class DBManager:
         return True
 
     def update_bracket_match_score(self, match_id, score1, score2, p1_id, p2_id, tournament_id, bracket_id, total_r1_matches, format_type):
-        """Met à jour un match d'arbre et propulse le gagnant (et le perdant si LB activé)"""
+        """Met à jour un match d'arbre et propulse le gagnant (et le perdant si LB ou Petite Finale activés)"""
         import math
         
         winner_id = p1_id if score1 > score2 else (p2_id if score2 > score1 else None)
@@ -587,11 +587,17 @@ class DBManager:
                     next_r = r_num + 1
                     next_m = math.ceil(m_num / 2)
                     push_player_to_next_match(winner_id, f"WB_R{next_r}_M{next_m}", is_p1=(m_num % 2 != 0))
+                    
+                    # 🥉 NOUVEAU : LA PETITE FINALE (Seulement en Single Elimination)
+                    if "single" in format_type and r_num == total_rounds_wb - 1:
+                        # Le perdant va en Petite Finale (Match 2 du dernier tour)
+                        push_player_to_next_match(loser_id, f"WB_R{total_rounds_wb}_M2", is_p1=(m_num == 1))
+
                 elif "double" in format_type and r_num == total_rounds_wb:
                     # Le grand vainqueur du WB file en Grande Finale
                     push_player_to_next_match(winner_id, f"WB_R{total_rounds_wb + 1}_M1", is_p1=True)
                 elif "double" in format_type and r_num == total_rounds_wb + 1:
-                    # ⚠️ NOUVEAU : LE BRACKET RESET
+                    # ⚠️ LE BRACKET RESET
                     # Si le Joueur 2 (qui vient du Loser Bracket) gagne la Grande Finale, on rejoue un match !
                     if winner_id == p2_id:
                         push_player_to_next_match(p1_id, f"WB_R{total_rounds_wb + 2}_M1", is_p1=True)
