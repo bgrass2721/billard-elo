@@ -806,3 +806,177 @@ class DBManager:
             return True, "Joueur retiré."
         except Exception as e:
             return False, f"Erreur : {e}"
+    
+    def get_user_gt_stats(self, user_id):
+        """Récupère le palmarès d'un joueur pour les Grands Tournois (Panthéon)."""
+        try:
+            # On suppose que ta table s'appelle gt_participants et qu'elle a une colonne final_rank
+            # Adapte le nom de la table des tournois (tournaments ou gt_tournaments) si besoin
+            res = (
+                self.supabase.table("gt_participants")
+                .select("final_rank, tournaments(name)")
+                .eq("user_id", user_id)
+                .not_.is_("final_rank", "null")
+                .execute()
+            )
+            return res.data if res.data else []
+        except Exception as e:
+            return []
+
+    def get_user_weekly_stats(self, user_id):
+        """Récupère le palmarès complet d'un joueur pour les tournois Weekly Fun."""
+        try:
+            res = (
+                self.supabase.table("weekly_participants")
+                .select("final_rank, weekly_tournaments(name, event_date)")
+                .eq("user_id", user_id)
+                .not_.is_("final_rank", "null")
+                .execute()
+            )
+            return res.data if res.data else []
+        except Exception as e:
+            return []
+
+    def calculate_and_save_final_rankings(self, tournament_id, t_format):
+        """Calcule automatiquement le classement final (Top X) d'un Grand Tournoi et l'enregistre."""
+        try:
+            # 1. On récupère tous les matchs terminés de ce tournoi
+            res_matches = (
+                self.supabase.table("gt_matches")
+                .select("*")
+                .eq("tournament_id", tournament_id)
+                .eq("status", "completed")
+                .execute()
+            )
+            matches = res_matches.data if res_matches.data else []
+
+            # 2. On récupère les participants actuels
+            res_parts = self.supabase.table("gt_participants").select("*").eq("tournament_id", tournament_id).execute()
+            participants = res_parts.data if res_parts.data else []
+            if not participants:
+                return False, "Aucun participant trouvé."
+
+            # Dictionnaire pour stocker le rang final de chacun: {user_id: rank}
+            final_ranks = {}
+            
+            # --- PHASE DE POULES (Traitement commun) ---
+            # On identifie d'abord les éliminés en phase de poules
+            group_matches = [m for m in matches if m["phase"] == "group"]
+            group_letters = set([m["group_name"] for m in group_matches if m["group_name"]])
+            
+            for g in group_letters:
+                g_parts = [p for p in participants if p["group_name"] == g]
+                g_m = [m for m in group_matches if m["group_name"] == g]
+                
+                # Recalcul rapide du classement de la poule
+                standings = {p["user_id"]: {"V": 0, "Diff": 0} for p in g_parts}
+                for m in g_m:
+                    w_id, l_id = m["winner_id"], m["loser_id"]
+                    if w_id and w_id in standings:
+                        standings[w_id]["V"] += 1
+                        standings[w_id]["Diff"] += (m["score1"] - m["score2"] if m["player1_id"] == w_id else m["score2"] - m["score1"])
+                    if l_id and l_id in standings:
+                        standings[l_id]["Diff"] += (m["score1"] - m["score2"] if m["player1_id"] == l_id else m["score2"] - m["score1"])
+                
+                sorted_g = sorted(standings.keys(), key=lambda uid: (standings[uid]["V"], standings[uid]["Diff"]), reverse=True)
+                
+                # Seuls les 2 premiers passent (normalement). Les autres sont classés.
+                if len(sorted_g) >= 3:
+                    final_ranks[sorted_g[2]] = 33 # 3ème de poule
+                if len(sorted_g) >= 4:
+                    final_ranks[sorted_g[3]] = 49 # 4ème de poule
+                # S'il y a un 5e ou 6e, tu pourrais ajouter 65, etc.
+
+            # --- PHASE D'ARBRE (Bracket) ---
+            bracket_matches = [m for m in matches if m["phase"] == "bracket"]
+            
+            is_double = "double" in t_format
+            
+            if not is_double:
+                # --- SIMPLE ÉLIMINATION ---
+                # Ex: WB_R1_M1 (1/32), WB_R2_M1 (1/16), WB_R3_M1 (1/8), WB_R4_M1 (1/4), WB_R5_M1 (Demies), WB_R6_M1 (Finale)
+                # Le nombre de rounds dépend du format (32, 64). On va plutôt chercher la "Finale" (le WB_ match avec le plus grand R).
+                
+                wb_matches = [m for m in bracket_matches if m["bracket_match_id"] and m["bracket_match_id"].startswith("WB_")]
+                
+                if wb_matches:
+                    # Trouver le round maximum (La finale)
+                    max_r = max([int(m["bracket_match_id"].split("_")[1][1:]) for m in wb_matches])
+                    
+                    for m in wb_matches:
+                        r_num = int(m["bracket_match_id"].split("_")[1][1:])
+                        w_id, l_id = m["winner_id"], m["loser_id"]
+                        
+                        if r_num == max_r:
+                            # C'est la Grande Finale
+                            if w_id: final_ranks[w_id] = 1
+                            if l_id: final_ranks[l_id] = 2
+                        elif r_num == max_r - 1:
+                            # Demies (Les perdants sont "en attente" de la petite finale, ou font Top 3 ex-aequo)
+                            # Si on n'a pas de petite finale, ils sont 3e ex-aequo.
+                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 3
+                        elif r_num == max_r - 2:
+                            # Quarts (Perdants = Top 5)
+                            if l_id: final_ranks[l_id] = 5
+                        elif r_num == max_r - 3:
+                            # Huitièmes (Perdants = Top 9)
+                            if l_id: final_ranks[l_id] = 9
+                        elif r_num == max_r - 4:
+                            # Seizièmes (Perdants = Top 17)
+                            if l_id: final_ranks[l_id] = 17
+                
+                # Chercher une éventuelle Petite Finale (ex: "THIRD_PLACE" ou similaire, si tu l'as gérée)
+                # Si tu as une petite finale, elle écrasera le '3' mis par défaut aux perdants des demies.
+                third_place_match = next((m for m in bracket_matches if m["bracket_match_id"] == "THIRD_PLACE"), None)
+                if third_place_match:
+                    if third_place_match["winner_id"]: final_ranks[third_place_match["winner_id"]] = 3
+                    if third_place_match["loser_id"]: final_ranks[third_place_match["loser_id"]] = 4
+
+            else:
+                # --- DOUBLE ÉLIMINATION ---
+                # La Grande Finale (Grand Final) décide du 1er et 2e
+                gf_match = next((m for m in bracket_matches if m["bracket_match_id"] == "GF"), None)
+                gf_reset = next((m for m in bracket_matches if m["bracket_match_id"] == "GF_RESET"), None)
+                
+                # Le gagnant final
+                if gf_reset and gf_reset["winner_id"]:
+                    final_ranks[gf_reset["winner_id"]] = 1
+                    final_ranks[gf_reset["loser_id"]] = 2
+                elif gf_match and gf_match["winner_id"]:
+                    # Si le WB gagne le premier match GF, pas de reset
+                    if not gf_reset:
+                        final_ranks[gf_match["winner_id"]] = 1
+                        final_ranks[gf_match["loser_id"]] = 2
+                
+                # Finale du Loser Bracket (LB_Final) = 3ème
+                lb_matches = [m for m in bracket_matches if m["bracket_match_id"] and m["bracket_match_id"].startswith("LB_")]
+                if lb_matches:
+                    max_lb_r = max([int(m["bracket_match_id"].split("_")[1][1:]) for m in lb_matches])
+                    
+                    for m in lb_matches:
+                        r_num = int(m["bracket_match_id"].split("_")[1][1:])
+                        l_id = m["loser_id"]
+                        
+                        if not l_id or l_id in final_ranks: continue # Déjà classé (1er ou 2e)
+                        
+                        if r_num == max_lb_r: final_ranks[l_id] = 3 # Perdant Finale LB = 3ème
+                        elif r_num == max_lb_r - 1: final_ranks[l_id] = 4 # Perdant Demie LB = 4ème
+                        elif r_num == max_lb_r - 2: final_ranks[l_id] = 5 # Top 5
+                        elif r_num == max_lb_r - 3: final_ranks[l_id] = 7 # Top 7
+                        elif r_num == max_lb_r - 4: final_ranks[l_id] = 9 # Top 9
+                        elif r_num == max_lb_r - 5: final_ranks[l_id] = 13 # Top 13
+                        elif r_num == max_lb_r - 6: final_ranks[l_id] = 17 # Top 17
+                        elif r_num == max_lb_r - 7: final_ranks[l_id] = 25 # Top 25
+                        # Et ainsi de suite selon la taille du tournoi...
+
+            # 3. Enregistrement en base de données
+            for uid, rank in final_ranks.items():
+                self.supabase.table("gt_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
+
+            # 4. On passe le tournoi en "completed"
+            self.supabase.table("tournaments").update({"status": "completed"}).eq("id", tournament_id).execute()
+
+            return True, "Tournoi clôturé et classements générés avec succès !"
+            
+        except Exception as e:
+            return False, f"Erreur lors du calcul des classements : {e}"

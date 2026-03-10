@@ -693,7 +693,7 @@ elif page == "👤 Profils Joueurs":
     
     try:
         if is_guest and len(all_players) > 0:
-            # Si c'est un visiteur, on sélectionne le N°1 du classement (le premier de all_players)
+            # Si c'est un visiteur, on sélectionne le N°1 du classement
             default_username = all_players[0]["username"]
             default_index = options.index(default_username)
         else:
@@ -708,7 +708,6 @@ elif page == "👤 Profils Joueurs":
     target_user = players_map[selected_username]
 
     # --- SÉCURITÉ : BLOCAGE SI PROFIL PRIVÉ ---
-    # Un visiteur ne peut jamais voir un profil privé !
     if target_user.get("is_hidden_profile", False) and (is_guest or target_user["id"] != user["id"]):
         st.warning(f"🔒 Le profil de {target_user['username']} est privé.")
         st.info("L'utilisateur a choisi de masquer ses statistiques et son historique.")
@@ -717,9 +716,32 @@ elif page == "👤 Profils Joueurs":
 
     st.header(f"👤 Profil de {target_user['username']}")
 
-    # --- 1. BADGES (NOUVEAU) ---
-    # On doit récupérer TOUS les matchs validés (peu importe le mode) pour ce joueur
-    # pour calculer ses badges correctement (Marathon, Globe-Trotter...)
+    # ==========================================
+    # 🏆 VITRINE 1 : LE PANTHÉON (GRANDS TOURNOIS)
+    # ==========================================
+    st.subheader("🏆 Le Panthéon")
+    gt_stats = db.get_user_gt_stats(target_user["id"])
+    
+    # On filtre pour ne garder que le podium (1er, 2e, 3e)
+    podium_finishes = [s for s in gt_stats if s.get('final_rank') in [1, 2, 3]]
+    
+    if not podium_finishes:
+        st.caption("Aucune médaille en Grand Tournoi pour le moment.")
+    else:
+        gt_gold = sum(1 for s in podium_finishes if s['final_rank'] == 1)
+        gt_silver = sum(1 for s in podium_finishes if s['final_rank'] == 2)
+        gt_bronze = sum(1 for s in podium_finishes if s['final_rank'] == 3)
+        
+        c1, c2, c3 = st.columns(3)
+        if gt_gold > 0: c1.markdown(f"### 🥇 Or : {gt_gold}")
+        if gt_silver > 0: c2.markdown(f"### 🥈 Argent : {gt_silver}")
+        if gt_bronze > 0: c3.markdown(f"### 🥉 Bronze : {gt_bronze}")
+
+    # ==========================================
+    # 🏅 VITRINE 2 : SUCCÈS DE CARRIÈRE (Anciens badges)
+    # ==========================================
+    st.divider()
+    st.subheader("🏅 Succès de Carrière")
     raw_matches = (
         db.supabase.table("matches")
         .select("*")
@@ -729,18 +751,62 @@ elif page == "👤 Profils Joueurs":
     )
 
     user_full_history = [
-        m
-        for m in raw_matches
+        m for m in raw_matches
         if m["winner_id"] == target_user["id"]
         or m["loser_id"] == target_user["id"]
         or m.get("winner2_id") == target_user["id"]
         or m.get("loser2_id") == target_user["id"]
     ]
 
-    # Affiche le HTML en l'interprétant graphiquement
     st.markdown(get_badges_html(target_user, user_full_history), unsafe_allow_html=True)
-    # ---------------------------
 
+    # ==========================================
+    # 🎉 VITRINE 3 : LE MUR DU FUN (WEEKLY FUN)
+    # ==========================================
+    st.divider()
+    st.subheader("🎉 Le Mur du Fun")
+    
+    weekly_stats = db.get_user_weekly_stats(target_user["id"])
+    
+    if not weekly_stats:
+        st.caption("Aucune participation aux soirées Weekly Fun pour le moment.")
+    else:
+        w_gold = sum(1 for s in weekly_stats if s['final_rank'] == 1)
+        w_silver = sum(1 for s in weekly_stats if s['final_rank'] == 2)
+        w_bronze = sum(1 for s in weekly_stats if s['final_rank'] == 3)
+        w_choco = sum(1 for s in weekly_stats if s['final_rank'] > 3)
+        
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        with bc1:
+            if w_gold > 0: st.markdown(f"🥇 **Or**\n## {w_gold}")
+            else: st.caption("🥇 Or\n--")
+        with bc2:
+            if w_silver > 0: st.markdown(f"🥈 **Argent**\n## {w_silver}")
+            else: st.caption("🥈 Argent\n--")
+        with bc3:
+            if w_bronze > 0: st.markdown(f"🥉 **Bronze**\n## {w_bronze}")
+            else: st.caption("🥉 Bronze\n--")
+        with bc4:
+            if w_choco > 0: st.markdown(f"🍫 **Chocolat**\n## {w_choco}")
+            else: st.caption("🍫 Chocolat\n--")
+
+        with st.expander("📜 Palmarès détaillé (Weekly Fun)"):
+            for s in sorted(weekly_stats, key=lambda x: x['weekly_tournaments']['event_date'] if x.get('weekly_tournaments') else '', reverse=True):
+                rank = s['final_rank']
+                emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🍫"
+                t_name = s.get('weekly_tournaments', {}).get('name', 'Tournoi Inconnu')
+                
+                # Gestion sécurisée de la date
+                t_date_raw = s.get('weekly_tournaments', {}).get('event_date')
+                t_date = pd.to_datetime(t_date_raw).strftime('%d/%m/%y') if t_date_raw else "Date inconnue"
+                
+                st.write(f"{emoji} **{rank}er/ème** au *{t_name}* ({t_date})")
+
+    st.divider()
+
+    # ==========================================
+    # 📈 STATISTIQUES ET COURBES ELO
+    # ==========================================
     # --- 1. SÉLECTEUR DE MODE (1v1 / 2v2) ---
     view_mode = st.radio(
         "Voir les statistiques :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True
@@ -759,17 +825,13 @@ elif page == "👤 Profils Joueurs":
     )
 
     # --- 3. RECONSTRUCTION DE LA COURBE & STATS ---
-
-    # Init des compteurs
     match_counter = 0
     win_counter = 0
     loss_counter = 0
 
-    # Courbe du joueur ciblé
     target_elo_curve = [{"Numéro": 0, "Date": "Début", "Elo": 1000}]
 
     for m in all_validated_matches:
-        # Est-ce que le joueur cible est impliqué ?
         is_involved = (
             m["winner_id"] == target_user["id"]
             or m["loser_id"] == target_user["id"]
@@ -779,7 +841,6 @@ elif page == "👤 Profils Joueurs":
 
         if is_involved:
             match_counter += 1
-            # Formatage Date et Heure
             dt_utc = pd.to_datetime(m["created_at"])
             dt_paris = (
                 dt_utc.tz_convert("Europe/Paris")
@@ -788,24 +849,20 @@ elif page == "👤 Profils Joueurs":
             )
             date_display = dt_paris.strftime("%d/%m %Hh%M")
 
-            # Est-ce une victoire ?
             is_win = (
                 m["winner_id"] == target_user["id"]
                 or m.get("winner2_id") == target_user["id"]
             )
 
-            # Mise à jour des compteurs
             if is_win:
                 win_counter += 1
             else:
                 loss_counter += 1
 
-            # Combien de points ?
             delta = m.get("elo_gain", 0)
             if delta is None:
                 delta = 0
 
-            # Mise à jour du score courant pour la courbe
             last_score = target_elo_curve[-1]["Elo"]
             new_score = last_score + delta if is_win else last_score - delta
 
@@ -822,7 +879,6 @@ elif page == "👤 Profils Joueurs":
     st.subheader(f"📈 Évolution {view_mode}")
 
     if len(target_elo_curve) > 1:
-        # A. Le Graphique
         df_curve = pd.DataFrame(target_elo_curve)
         chart = (
             alt.Chart(df_curve)
@@ -837,14 +893,10 @@ elif page == "👤 Profils Joueurs":
         )
         st.altair_chart(chart, use_container_width=True)
 
-        # B. Les Statistiques
         current_elo = target_elo_curve[-1]["Elo"]
         diff_total = current_elo - 1000
-
-        # Calcul du taux de victoire
         win_rate = (win_counter / match_counter * 100) if match_counter > 0 else 0
 
-        # Affichage sur 4 colonnes
         k1, k2, k3, k4 = st.columns(4)
         k1.metric(f"Elo {view_mode}", current_elo, delta=diff_total)
         k2.metric("Matchs Joués", match_counter)
@@ -852,16 +904,13 @@ elif page == "👤 Profils Joueurs":
         k4.metric("Défaites", loss_counter)
 
     else:
-        st.info(
-            f"{target_user['username']} n'a pas encore de match classé en {view_mode}."
-        )
+        st.info(f"{target_user['username']} n'a pas encore de match classé en {view_mode}.")
 
     st.divider()
 
     # --- 5. HISTORIQUE RÉCENT ---
     st.subheader(f"🗓️ Derniers Matchs ({view_mode})")
 
-    # On filtre pour ne garder que les matchs du joueur
     my_matches = []
     for m in all_validated_matches:
         if (
@@ -872,7 +921,6 @@ elif page == "👤 Profils Joueurs":
         ):
             my_matches.append(m)
 
-    # On prend les 10 derniers
     recent_matches = my_matches[::-1][:10]
     id_name = {p["id"]: p["username"] for p in all_players}
 
@@ -929,16 +977,11 @@ elif page == "👤 Profils Joueurs":
                 }
             )
 
-        st.dataframe(
-            pd.DataFrame(history_data), use_container_width=True, hide_index=True
-        )
+        st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
 
-        # ... (le reste de ta page profil) ...
-    
     st.divider()
     
-    # --- NOUVEAU : PARAMÈTRES DU COMPTE ---
-    # On affiche ça uniquement si c'est MON profil (et pas celui d'un autre joueur)
+    # --- 6. PARAMÈTRES DU COMPTE ---
     if not is_guest and target_user["id"] == user["id"]:
         st.subheader("⚙️ Paramètres du compte")
         
@@ -953,7 +996,6 @@ elif page == "👤 Profils Joueurs":
                         st.success("✅ " + msg)
                     else:
                         st.error(msg)
-
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Déclarer un résultat")
     
@@ -2749,15 +2791,20 @@ elif page == "🏟️ Grand Tournoi":
                                 st.write("") # Petit espace entre chaque tour
 
                     st.divider()
-                    st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
-                    if st.button("🏆 Clôturer le Tournoi (Archiver)", type="primary"):
-                        db.update_tournament_status(selected_t["id"], "completed")
-                        st.success("Tournoi terminé et archivé !")
+                st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
+                st.warning("⚠️ Attention : Cette action va générer automatiquement le classement final (Top 1, 2, 3, Top 5, Top 9...) pour tous les joueurs en fonction de leur parcours dans l'arbre, puis archivera le tournoi.")
+                
+                if st.button("🏆 Calculer les classements et Archiver", type="primary"):
+                    success, msg = db.calculate_and_save_final_rankings(selected_t["id"], selected_t["format"])
+                    if success:
+                        st.success(msg)
                         st.balloons()
                         st.rerun()
+                    else:
+                        st.error(msg)
 
-                elif selected_t["status"] == "completed":
-                    st.success("🏁 Ce tournoi est terminé et archivé.")
+            elif selected_t["status"] == "completed":
+                st.success("🏁 Ce tournoi est terminé et archivé.")
                 
 
 elif page == "⚙️ Paramètres":
