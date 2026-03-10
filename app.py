@@ -2559,25 +2559,37 @@ elif page == "🏟️ Grand Tournoi":
                             # On boucle sur chaque tour, de gauche à droite
                             for r_num in range(1, total_rounds_wb + 1):
                                 is_finale = (r_num == total_rounds_wb)
-                                titre_tour = "👑 Finale" if is_finale else f"Tour {r_num}"
                                 
-                                st.markdown(f"##### {titre_tour}")
-                                
-                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
-                                
-                                # On crée des rangées de 3 colonnes max pour que ça reste toujours large et lisible
-                                cols_per_row = min(3, expected_count) if expected_count > 1 else 1
-                                cols = st.columns(cols_per_row)
-                                
-                                for m_num in range(1, expected_count + 1):
-                                    col = cols[(m_num - 1) % cols_per_row]
-                                    m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
-                                    draw_interactive_match(col, m, r_num, m_num, is_gf=is_finale)
+                                if not is_finale:
+                                    st.markdown(f"##### Tour {r_num}")
+                                    expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                    
+                                    # On crée des rangées de 3 colonnes max pour que ça reste toujours large et lisible
+                                    cols_per_row = min(3, expected_count) if expected_count > 1 else 1
+                                    cols = st.columns(cols_per_row)
+                                    
+                                    for m_num in range(1, expected_count + 1):
+                                        col = cols[(m_num - 1) % cols_per_row]
+                                        m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
+                                        draw_interactive_match(col, m, r_num, m_num)
+                                else:
+                                    # LE DERNIER TOUR : Grande Finale et Petite Finale
+                                    st.markdown("##### 👑 Finales")
+                                    cols_finales = st.columns(2)
+                                    
+                                    # 1. Grande Finale (M1)
+                                    m_gf = tier_dict_wb.get(f"WB_R{r_num}_M1")
+                                    draw_interactive_match(cols_finales[0], m_gf, r_num, 1, is_gf=True)
+                                    
+                                    # 2. Petite Finale (M2)
+                                    m_pf = tier_dict_wb.get(f"WB_R{r_num}_M2")
+                                    cols_finales[1].markdown("<div style='text-align:center; color:#CD7F32; font-weight:bold; margin-bottom: 5px;'>🥉 Petite Finale</div>", unsafe_allow_html=True)
+                                    draw_interactive_match(cols_finales[1], m_pf, r_num, 2, is_gf=False)
                                 
                                 st.write("") # Petit espace entre chaque tour
 
                     st.divider()
-                    st.info("Une fois la Grande Finale jouée et validée, vous pourrez clôturer l'événement.")
+                    st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
                     if st.button("🏆 Clôturer le Tournoi (Archiver)", type="primary"):
                         db.update_tournament_status(selected_t["id"], "completed")
                         st.success("Tournoi terminé et archivé !")
