@@ -473,6 +473,23 @@ if st.session_state.user_data is None:
             st.session_state.guest_mode = True
             st.rerun()
 
+        st.write("---")
+        
+        # --- NOUVEAU : MOT DE PASSE OUBLIÉ ---
+        with st.expander("Mot de passe oublié ?"):
+            st.info("Entrez votre email. Nous vous enverrons un lien pour vous connecter et changer votre mot de passe.")
+            reset_email = st.text_input("Votre adresse email", key="reset_email_input")
+            
+            if st.button("Envoyer le lien de récupération", type="secondary"):
+                if not reset_email:
+                    st.warning("Veuillez entrer une adresse email.")
+                else:
+                    success, msg = db.send_password_reset(reset_email)
+                    if success:
+                        st.success("📧 Email envoyé ! Vérifiez vos spams. Cliquez sur le lien dans l'email pour revenir ici.")
+                    else:
+                        st.error(msg)
+
     with tab2:
         st.info("⚠️ Un code d'invitation est requis pour s'inscrire.")
         with st.form("signup_form"):
@@ -915,6 +932,27 @@ elif page == "👤 Profils Joueurs":
             pd.DataFrame(history_data), use_container_width=True, hide_index=True
         )
 
+        # ... (le reste de ta page profil) ...
+    
+    st.divider()
+    
+    # --- NOUVEAU : PARAMÈTRES DU COMPTE ---
+    # On affiche ça uniquement si c'est MON profil (et pas celui d'un autre joueur)
+    if not is_guest and target_user["id"] == user["id"]:
+        st.subheader("⚙️ Paramètres du compte")
+        
+        with st.expander("Changer mon mot de passe"):
+            new_pass = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password")
+            if st.button("Mettre à jour le mot de passe"):
+                if len(new_pass) < 6:
+                    st.warning("Le mot de passe doit faire au moins 6 caractères.")
+                else:
+                    success, msg = db.update_password(new_pass)
+                    if success:
+                        st.success("✅ " + msg)
+                    else:
+                        st.error(msg)
+
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Déclarer un résultat")
     
@@ -1164,7 +1202,7 @@ elif page == "🆚 Comparateur de joueurs":
     player_2 = players_map[p2_name]
     id_1 = player_1["id"]
     id_2 = player_2["id"]
-    
+
     # 3. SÉLECTEUR DE MODE
     st.write("")
     hist_mode = st.radio(

@@ -27,6 +27,23 @@ class DBManager:
             {"email": email, "password": password}
         )
 
+    def send_password_reset(self, email):
+        """Envoie un email avec un lien de réinitialisation de mot de passe."""
+        try:
+            # Supabase s'occupe de générer et d'envoyer l'email
+            self.supabase.auth.reset_password_email(email)
+            return True, "Email envoyé avec succès."
+        except Exception as e:
+            return False, f"Erreur lors de l'envoi : {e}"
+
+    def update_password(self, new_password):
+        """Met à jour le mot de passe de l'utilisateur actuellement connecté."""
+        try:
+            self.supabase.auth.update_user({"password": new_password})
+            return True, "Mot de passe mis à jour avec succès !"
+        except Exception as e:
+            return False, f"Erreur de mise à jour : {e}"
+
     def get_user_profile(self, username):
         """Récupère toutes les infos d'un joueur (y compris son rôle admin)"""
         return (
