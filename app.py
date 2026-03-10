@@ -2791,19 +2791,14 @@ elif page == "🏟️ Grand Tournoi":
                                 st.write("") # Petit espace entre chaque tour
 
                     st.divider()
-                st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
-                st.warning("⚠️ Attention : Cette action va générer automatiquement le classement final (Top 1, 2, 3, Top 5, Top 9...) pour tous les joueurs en fonction de leur parcours dans l'arbre, puis archivera le tournoi.")
-                
-                if st.button("🏆 Calculer les classements et Archiver", type="primary"):
-                    success, msg = db.calculate_and_save_final_rankings(selected_t["id"], selected_t["format"])
-                    if success:
-                        st.success(msg)
+                    st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
+                    if st.button("🏆 Clôturer le Tournoi (Archiver)", type="primary"):
+                        db.update_tournament_status(selected_t["id"], "completed")
+                        st.success("Tournoi terminé et archivé !")
                         st.balloons()
                         st.rerun()
-                    else:
-                        st.error(msg)
 
-            elif selected_t["status"] == "completed":
+                elif selected_t["status"] == "completed":
                 st.success("🏁 Ce tournoi est terminé et archivé.")
                 
 
