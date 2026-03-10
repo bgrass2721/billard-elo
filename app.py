@@ -1813,13 +1813,13 @@ elif page == "🏟️ Grand Tournoi":
                         tier_matches = [m for m in matches_brk if m["bracket_match_id"].startswith(prefix)]
                         tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
                         
-                        # Fonction interne magique : Génère le code HTML d'un match (Évite de répéter le code)
-                        def get_match_card(r_num, m_num, is_gf=False):
+                        # Fonction interne magique : Génère le code HTML d'un match
+                        def get_match_card(r_num, m_num, is_gf=False, is_pf=False):
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
                             
-                            bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else "#1E1E28"
-                            border_color = "#FFD700" if is_gf else "#444"
+                            bg_color = "rgba(255, 215, 0, 0.05)" if is_gf else ("rgba(205, 127, 50, 0.05)" if is_pf else "#1E1E28")
+                            border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
                             
                             c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
                             c_html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
@@ -1862,7 +1862,9 @@ elif page == "🏟️ Grand Tournoi":
                             for r_num in range(1, num_rounds + 1):
                                 html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
                                 
-                                if prefix == "WB" and r_num == total_rounds_wb + 1: col_title = "👑 Grande Finale"
+                                is_final_col = (prefix == "WB" and r_num == total_rounds_wb + 1)
+                                
+                                if is_final_col: col_title = "👑 Grande Finale"
                                 elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Bracket Reset"
                                 else: col_title = f"Tour {r_num}"
                                 html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
@@ -1878,6 +1880,7 @@ elif page == "🏟️ Grand Tournoi":
                                 for m_num in range(1, expected_count + 1):
                                     is_gf = (prefix == "WB" and r_num > total_rounds_wb)
                                     html += get_match_card(r_num, m_num, is_gf)
+
                                 html += "</div></div>"
                             html += "</div>"
                             
@@ -1898,12 +1901,20 @@ elif page == "🏟️ Grand Tournoi":
                                 html += "</div></div>"
                             html += "</div>"
                             
-                            # B. CENTRE (Finale)
-                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 220px; margin: 0 10px;'>"
+                            # B. CENTRE (Grande Finale + Petite Finale)
+                            html += "<div style='display: flex; flex-direction: column; justify-content: center; flex: 0 0 220px; margin: 0 10px; gap: 40px;'>"
+                            
+                            html += "<div>"
                             html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
-                            html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                             html += get_match_card(total_rounds_wb, 1, is_gf=True)
-                            html += "</div></div>"
+                            html += "</div>"
+                            
+                            html += "<div>"
+                            html += f"<div style='text-align: center; color: #CD7F32; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>🥉 Petite Finale</div>"
+                            html += get_match_card(total_rounds_wb, 2, is_gf=False, is_pf=True)
+                            html += "</div>"
+                            
+                            html += "</div>"
                             
                             # C. PARTIE DROITE (On inverse l'ordre !)
                             html += "<div style='display: flex; flex-direction: row-reverse;'>"
@@ -1918,7 +1929,7 @@ elif page == "🏟️ Grand Tournoi":
                                 html += "</div></div>"
                             html += "</div>"
                             
-                            html += "</div>" # Fin du flex-start
+                            html += "</div>"
                         
                         return html
 
