@@ -532,7 +532,7 @@ class DBManager:
                 "tournament_id": tournament_id,
                 "bracket_match_id": f"WB_R{total_rounds_wb}_M2", # M2 = Le 2ème match du dernier tour (Petite Finale)
                 "status": "pending",
-                "tier": "bracket"
+                "phase": "bracket"
             })
 
         # --- Fin de l'ajout ---
