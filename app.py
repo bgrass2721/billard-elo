@@ -578,6 +578,7 @@ menu_options = [
     "🎯 Déclarer un match",
     "🆚 Comparateur de joueurs",
     "📑 Mes validations",
+    "🍻 Weekly Fun",
     "🏟️ Grand Tournoi",
     "📢 Nouveautés",
     "📜 Règlement",
@@ -2793,3 +2794,216 @@ elif page == "⚙️ Paramètres":
                 st.rerun()
             else:
                 st.error("❌ " + msg)
+
+elif page == "🍻 Weekly Fun":
+    st.header("🍻 Les Soirées Weekly Fun")
+    
+    # Vérification du statut Admin avec ta vraie colonne
+    is_guest = st.session_state.get("guest_mode", False)
+    is_admin = not is_guest and user.get("is_admin", False)
+
+    # ==========================================
+    # 🛠️ VUE ADMIN : CRÉATION & GESTION
+    # ==========================================
+    if is_admin:
+        with st.expander("🛠️ Zone Admin : Créer un nouveau Weekly Fun"):
+            st.info("Créer un nouveau tournoi placera automatiquement le précédent dans les archives.")
+            
+            with st.form("form_create_weekly"):
+                w_name = st.text_input("Nom du tournoi", placeholder="Ex: Tournoi Main Gauche, Le Défi du Mercredi...")
+                w_desc = st.text_area("Description / Règles spéciales", placeholder="Ex: Ce soir, la casse est obligatoire par la bande...")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    w_max_players = st.number_input("Nombre de places maximum", min_value=4, max_value=64, value=16, step=1)
+                with col2:
+                    import datetime
+                    w_date = st.date_input("Date de l'événement", value=datetime.date.today())
+                    
+                submitted_weekly = st.form_submit_button("Publier le tournoi 🚀")
+                
+                if submitted_weekly:
+                    if not w_name:
+                        st.error("⚠️ Le nom du tournoi est obligatoire.")
+                    else:
+                        success, msg = db.create_weekly_tournament(w_name, w_desc, w_max_players, w_date)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                            
+        st.divider()
+
+    # ==========================================
+    # 📺 VUE SPECTATEUR / JOUEUR : LE TOURNOI EN COURS
+    # ==========================================
+    
+    # On récupère le tournoi actif
+    current_weekly = db.get_current_weekly_tournament()
+    
+    if not current_weekly:
+        st.info("🛌 Aucun tournoi Weekly Fun n'est prévu pour le moment. L'admin prépare sûrement le prochain !")
+    else:
+        # Formatage propre de la date et gestion de la description
+        formatted_date = pd.to_datetime(current_weekly['event_date']).strftime('%d/%m/%Y')
+        description_text = current_weekly.get('description', '')
+        if not description_text:
+            description_text = "Aucune règle spéciale pour ce tournoi."
+
+        # Affiche la bannière du tournoi avec le design premium
+        st.markdown(
+            f"""
+<div style='background-color: #2b2b36; padding: 25px; border-radius: 12px; border-left: 6px solid #FF4B4B; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 25px;'>
+    <h2 style='margin-top: 0; margin-bottom: 15px; color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
+        🏆 {current_weekly['name']}
+    </h2>
+    <div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>
+        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+            📅 Date : <span style='color: #ffffff; font-weight: bold;'>{formatted_date}</span>
+        </div>
+        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+            🎟️ Places : <span style='color: #ffffff; font-weight: bold;'>{current_weekly['max_players']} max</span>
+        </div>
+    </div>
+    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;'>
+        <i>{description_text}</i>
+    </div>
+</div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        # --- 👥 SYSTÈME D'INSCRIPTION ET LISTE D'ATTENTE ---
+        st.subheader("👥 Joueurs Inscrits")
+        
+        # 1. On récupère tous les joueurs inscrits à ce tournoi
+        participants = db.get_weekly_participants(current_weekly['id'])
+        max_p = current_weekly['max_players']
+
+        # --- 🛠️ MODÉRATION ADMIN (AJOUTER / SUPPRIMER) ---
+        if is_admin:
+            with st.expander("🛠️ Modération de la liste"):
+                col_add, col_rem = st.columns(2)
+                
+                with col_add:
+                    st.write("**Ajouter un joueur (Forcer)**")
+                    # On récupère tous les profils pour le menu déroulant
+                    all_p_res = db.get_leaderboard()
+                    if all_p_res.data:
+                        player_names = [p['username'] for p in all_p_res.data]
+                        target_name = st.selectbox("Sélectionner un joueur", player_names, key="admin_add_select")
+                        if st.button("Ajouter manuellement"):
+                            # On trouve l'ID correspondant au nom
+                            target_id = next(p['id'] for p in all_p_res.data if p['username'] == target_name)
+                            db.register_weekly(current_weekly['id'], target_id)
+                            st.success(f"Ajout de {target_name} réussi !")
+                            st.rerun()
+                
+                with col_rem:
+                    st.write("**Retirer un joueur**")
+                    if not participants:
+                        st.write("Aucun joueur à retirer.")
+                    else:
+                        # On liste les gens actuellement dans le tournoi
+                        current_p_names = [p.get('profiles', {}).get('username', 'Inconnu') for p in participants]
+                        rem_name = st.selectbox("Joueur à expulser", current_p_names, key="admin_rem_select")
+                        if st.button("Expulser du tournoi", type="secondary"):
+                            # On trouve l'ID correspondant
+                            rem_id = next(p['user_id'] for p in participants if p.get('profiles', {}).get('username') == rem_name)
+                            db.admin_remove_participant(current_weekly['id'], rem_id)
+                            st.warning(f"{rem_name} a été retiré.")
+                            st.rerun()
+        
+        # 2. Le script coupe la liste en deux selon la limite de places
+        main_list = participants[:max_p]
+        wait_list = participants[max_p:]
+        
+        # 3. Est-ce que le joueur qui regarde la page est dedans ?
+        is_registered = False
+        if not is_guest:
+            is_registered = any(p['user_id'] == user['id'] for p in participants)
+        
+        # 4. Le bouton d'action magique
+        col_btn, _ = st.columns([1, 2])
+        with col_btn:
+            if is_guest:
+                st.info("🔒 Connectez-vous pour vous inscrire.")
+            else:
+                if is_registered:
+                    if st.button("❌ Se désinscrire", type="secondary", use_container_width=True):
+                        db.unregister_weekly(current_weekly['id'], user['id'])
+                        st.rerun()
+                else:
+                    # Le texte du bouton s'adapte s'il n'y a plus de place
+                    btn_text = "✅ S'inscrire" if len(participants) < max_p else "⏳ Rejoindre la file d'attente"
+                    if st.button(btn_text, type="primary", use_container_width=True):
+                        db.register_weekly(current_weekly['id'], user['id'])
+                        st.rerun()
+
+        st.write("") # Petit espace
+        
+        # 5. Affichage propre des deux listes
+        col_main, col_wait = st.columns(2)
+        
+        with col_main:
+            st.markdown(f"#### 📋 Liste Principale ({len(main_list)}/{max_p})")
+            if not main_list:
+                st.write("Aucun inscrit pour le moment.")
+            else:
+                for i, p in enumerate(main_list):
+                    # On affiche le joueur en gras si c'est "nous"
+                    username = p.get('profiles', {}).get('username', 'Inconnu')
+                    if not is_guest and p['user_id'] == user['id']:
+                        st.markdown(f"**{i+1}. {username} (Vous)**", help="Vous êtes qualifié d'office !")
+                    else:
+                        st.markdown(f"{i+1}. {username}")
+                        
+        with col_wait:
+            st.markdown(f"#### ⏳ Liste d'Attente ({len(wait_list)})")
+            if not wait_list:
+                st.caption("Personne en attente.")
+            else:
+                for i, p in enumerate(wait_list):
+                    username = p.get('profiles', {}).get('username', 'Inconnu')
+                    if not is_guest and p['user_id'] == user['id']:
+                        st.markdown(f"**{max_p + i + 1}. {username} (Vous)**", help="Si quelqu'un se désiste, vous montez !")
+                    else:
+                        st.caption(f"{max_p + i + 1}. {username}")
+
+        # ==========================================
+        # 👑 PANNEAU DE CONTRÔLE ADMIN (Tournoi Actif)
+        # ==========================================
+        if is_admin:
+            st.divider()
+            st.subheader("👑 Panneau de Clôture (Admin)")
+            
+            if not participants:
+                st.info("Impossible de clôturer un tournoi sans participants.")
+            else:
+                with st.expander("🏆 Saisir le classement final et clôturer", expanded=False):
+                    st.warning("⚠️ Attention : Une fois clôturé, le tournoi sera archivé et les badges seront distribués. Cette action est définitive.")
+                    
+                    with st.form("form_close_weekly"):
+                        st.write("Indiquez la position finale de chaque joueur (1 pour le vainqueur, 2, 3, etc.) :")
+                        
+                        # Dictionnaire pour stocker les résultats saisis
+                        rank_inputs = {}
+                        
+                        # On crée une ligne par joueur pour saisir son rang
+                        for p in participants:
+                            u_name = p.get('profiles', {}).get('username', 'Inconnu')
+                            u_id = p['user_id']
+                            
+                            # On met 0 par défaut (il faudra que l'admin change la valeur)
+                            rank_inputs[u_id] = st.number_input(f"Rang pour {u_name}", min_value=1, max_value=len(participants), value=1, key=f"rank_{u_id}")
+                            
+                        submit_close = st.form_submit_button("Clôturer le Tournoi 🔒", type="primary")
+                        
+                        if submit_close:
+                            success, msg = db.close_weekly_tournament(current_weekly['id'], rank_inputs)
+                            if success:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg)

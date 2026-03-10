@@ -703,3 +703,106 @@ class DBManager:
             return True, "Fusion réussie ! Le joueur a récupéré tout son historique."
         except Exception as e:
             return False, f"Erreur lors de la fusion : {str(e)}"
+
+    def create_weekly_tournament(self, name, description, max_players, event_date):
+        """Crée un nouveau tournoi hebdomadaire (Weekly Fun)."""
+        try:
+            # On convertit la date au format texte pour Supabase (YYYY-MM-DD)
+            date_str = event_date.strftime("%Y-%m-%d")
+            
+            # On insère les données dans la nouvelle table
+            data = {
+                "name": name,
+                "description": description,
+                "max_players": max_players,
+                "event_date": date_str,
+                "status": "open" # Ouvert aux inscriptions par défaut
+            }
+            
+            res = self.supabase.table("weekly_tournaments").insert(data).execute()
+            
+            if res.data:
+                return True, "Tournoi Weekly Fun créé avec succès !"
+            return False, "Erreur lors de la création."
+        except Exception as e:
+            return False, f"Erreur technique : {e}"
+
+    def get_current_weekly_tournament(self):
+        """Récupère le tournoi Weekly Fun actuellement ouvert (le plus récent)."""
+        try:
+            res = (
+                self.supabase.table("weekly_tournaments")
+                .select("*")
+                .eq("status", "open")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return res.data[0]
+            return None
+        except Exception as e:
+            return None
+
+    def get_weekly_participants(self, tournament_id):
+        """Récupère la liste des inscrits pour un tournoi, triée par ordre d'arrivée."""
+        try:
+            res = (
+                self.supabase.table("weekly_participants")
+                .select("*, profiles(username)")
+                .eq("tournament_id", tournament_id)
+                .eq("status", "registered")
+                .order("created_at", desc=False) # Ordre chronologique vital pour la liste d'attente !
+                .execute()
+            )
+            return res.data if res.data else []
+        except Exception as e:
+            return []
+
+    def register_weekly(self, tournament_id, user_id):
+        """Inscrit un joueur au tournoi."""
+        try:
+            # On vérifie s'il n'est pas déjà inscrit pour éviter les doublons
+            existing = self.supabase.table("weekly_participants").select("*").eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            if existing.data:
+                # S'il était désinscrit avant, on supprime la vieille trace pour lui donner un nouveau "created_at"
+                self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+                
+            data = {"tournament_id": tournament_id, "user_id": user_id, "status": "registered"}
+            self.supabase.table("weekly_participants").insert(data).execute()
+            return True, "Inscription réussie !"
+        except Exception as e:
+            return False, f"Erreur : {e}"
+
+    def unregister_weekly(self, tournament_id, user_id):
+        """Désinscrit un joueur du tournoi en supprimant sa ligne."""
+        try:
+            self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            return True, "Désinscription réussie."
+        except Exception as e:
+            return False, f"Erreur : {e}"
+
+    def close_weekly_tournament(self, tournament_id, rankings):
+        """
+        Clôture le tournoi hebdomadaire et enregistre le classement final.
+        'rankings' est un dictionnaire de type {user_id: rang_final}
+        """
+        try:
+            # 1. On met à jour le rang de chaque participant
+            for u_id, rank in rankings.items():
+                self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", u_id).execute()
+            
+            # 2. On change le statut du tournoi pour l'archiver
+            self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
+            
+            return True, "Tournoi clôturé avec succès ! Les badges sont distribués."
+        except Exception as e:
+            return False, f"Erreur lors de la clôture : {e}"
+
+    def admin_remove_participant(self, tournament_id, user_id):
+        """L'admin supprime un participant du tournoi."""
+        try:
+            self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            return True, "Joueur retiré."
+        except Exception as e:
+            return False, f"Erreur : {e}"
