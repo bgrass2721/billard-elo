@@ -2799,7 +2799,7 @@ elif page == "🏟️ Grand Tournoi":
                         st.rerun()
 
                 elif selected_t["status"] == "completed":
-                st.success("🏁 Ce tournoi est terminé et archivé.")
+                    st.success("🏁 Ce tournoi est terminé et archivé.")
                 
 
 elif page == "⚙️ Paramètres":
