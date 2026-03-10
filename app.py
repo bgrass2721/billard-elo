@@ -2466,70 +2466,112 @@ elif page == "🏟️ Grand Tournoi":
                         st.divider()
                         st.markdown("### ✏️ Saisie des scores")
 
-                        # --- FONCTION DE SAISIE DES SCORES ---
-                        def draw_bracket_tier(prefix, title, start_round, end_round):
-                            st.markdown(f"#### {title}")
-                            tier_matches = [m for m in matches if m["bracket_match_id"].startswith(prefix)]
-                            tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
-
-                            num_cols = end_round - start_round + 1
-                            cols = st.columns(num_cols)
-                            
-                            for r_idx, col in enumerate(cols):
-                                r_num = start_round + r_idx
-                                col.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                        # --- NOUVELLE FONCTION DE SAISIE INTERACTIVE (PAPILLON COMPATIBLE) ---
+                        def draw_interactive_match(col, m, r_num, m_num, is_gf=False):
+                            bg_color = "background: rgba(255, 215, 0, 0.1);" if is_gf else ""
+                            with col.container(border=True):
+                                st.markdown(f"<div style='text-align:center; font-size:10px; opacity:0.5; {bg_color}'>Match {m_num}</div>", unsafe_allow_html=True)
                                 
-                                if prefix == "WB":
-                                    expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
-                                else:
-                                    expected_count = max(1, nb_matches_r1 // (2 ** math.ceil(r_num / 2)))
-                                
-                                for m_num in range(1, expected_count + 1):
-                                    b_id = f"{prefix}_R{r_num}_M{m_num}"
-                                    m = tier_dict.get(b_id)
+                                if m:
+                                    p1_name = all_users.get(m.get("player1_id"), "En attente...") if m.get("player1_id") else "En attente..."
+                                    p2_name = all_users.get(m.get("player2_id"), "En attente...") if m.get("player2_id") else "En attente..."
+                                    is_done = m["status"] == "completed"
                                     
-                                    bg_color = "background: rgba(255, 215, 0, 0.1);" if (prefix=="WB" and r_num > total_rounds_wb) else ""
-
-                                    with col.container(border=True):
-                                        st.markdown(f"<div style='text-align:center; font-size:10px; opacity:0.5; {bg_color}'>Match {m_num}</div>", unsafe_allow_html=True)
+                                    st.write(f"**{p1_name}**")
+                                    st.write(f"**{p2_name}**")
+                                    
+                                    if p1_name != "En attente..." and p2_name != "En attente...":
+                                        sc1, sc2 = st.columns(2)
+                                        s1 = sc1.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"b_s1_{m['id']}", label_visibility="collapsed")
+                                        s2 = sc2.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"b_s2_{m['id']}", label_visibility="collapsed")
                                         
-                                        if m:
-                                            p1_name = all_users.get(m.get("player1_id"), "En attente...") if m.get("player1_id") else "En attente..."
-                                            p2_name = all_users.get(m.get("player2_id"), "En attente...") if m.get("player2_id") else "En attente..."
-                                            is_done = m["status"] == "completed"
-                                            
-                                            st.write(f"**{p1_name}**")
-                                            st.write(f"**{p2_name}**")
-                                            
-                                            if p1_name != "En attente..." and p2_name != "En attente...":
-                                                sc1, sc2 = st.columns(2)
-                                                s1 = sc1.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"b_s1_{m['id']}", label_visibility="collapsed")
-                                                s2 = sc2.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"b_s2_{m['id']}", label_visibility="collapsed")
-                                                
-                                                btn_lbl = "MAJ" if is_done else "Valider"
-                                                if st.button(btn_lbl, key=f"b_btn_{m['id']}", use_container_width=True):
-                                                    if s1 == s2:
-                                                        st.error("Il faut un vainqueur !")
-                                                    else:
-                                                        db.update_bracket_match_score(m["id"], s1, s2, m["player1_id"], m["player2_id"], selected_t["id"], m["bracket_match_id"], nb_matches_r1, selected_t["format"])
-                                                        st.rerun()
-                                        else:
-                                            st.write("**En attente...**")
-                                            st.write("**En attente...**")
+                                        btn_lbl = "MAJ" if is_done else "Valider"
+                                        if st.button(btn_lbl, key=f"b_btn_{m['id']}", use_container_width=True):
+                                            if s1 == s2:
+                                                st.error("Il faut un vainqueur !")
+                                            else:
+                                                db.update_bracket_match_score(m["id"], s1, s2, m["player1_id"], m["player2_id"], selected_t["id"], m["bracket_match_id"], nb_matches_r1, selected_t["format"])
+                                                st.rerun()
+                                else:
+                                    st.write("**En attente...**")
+                                    st.write("**En attente...**")
 
-                        # --- AFFICHAGE DES ZONES DE SAISIE ---
-                        draw_bracket_tier("WB", "🏆 Winner Bracket", 1, total_rounds_wb)
-                        
+                        # --- AFFICHAGE DES ZONES DE SAISIE SELON LE FORMAT ---
+                        tier_matches_wb = [m for m in matches if m["bracket_match_id"].startswith("WB")]
+                        tier_dict_wb = {m["bracket_match_id"]: m for m in tier_matches_wb}
+
                         if is_double_elim:
+                            # 1. WINNER BRACKET (DE GAUCHE À DROITE)
+                            st.markdown("#### 🏆 Winner Bracket")
+                            cols_wb = st.columns(total_rounds_wb)
+                            for r_idx, col in enumerate(cols_wb):
+                                r_num = 1 + r_idx
+                                col.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                for m_num in range(1, expected_count + 1):
+                                    m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
+                                    draw_interactive_match(col, m, r_num, m_num)
+                            
+                            # 2. LOSER BRACKET
                             st.divider()
+                            st.markdown("#### 💀 Loser Bracket (Repêchages)")
                             total_rounds_lb = (total_rounds_wb - 1) * 2
-                            draw_bracket_tier("LB", "💀 Loser Bracket (Repêchages)", 1, total_rounds_lb)
-
+                            tier_matches_lb = [m for m in matches if m["bracket_match_id"].startswith("LB")]
+                            tier_dict_lb = {m["bracket_match_id"]: m for m in tier_matches_lb}
+                            cols_lb = st.columns(total_rounds_lb)
+                            for r_idx, col in enumerate(cols_lb):
+                                r_num = 1 + r_idx
+                                col.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                expected_count = max(1, nb_matches_r1 // (2 ** math.ceil(r_num / 2)))
+                                for m_num in range(1, expected_count + 1):
+                                    m = tier_dict_lb.get(f"LB_R{r_num}_M{m_num}")
+                                    draw_interactive_match(col, m, r_num, m_num)
+                                    
+                            # 3. GRANDE FINALE
                             st.divider()
                             has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches)
                             end_round = total_rounds_wb + 2 if has_reset else total_rounds_wb + 1
                             title = "👑 Grande Finale & Bracket Reset" if has_reset else "👑 Grande Finale"
-                            draw_bracket_tier("WB", title, total_rounds_wb + 1, end_round)
+                            st.markdown(f"#### {title}")
+                            num_cols_gf = end_round - total_rounds_wb
+                            cols_gf = st.columns(num_cols_gf)
+                            for r_idx, col in enumerate(cols_gf):
+                                r_num = total_rounds_wb + 1 + r_idx
+                                col.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                m = tier_dict_wb.get(f"WB_R{r_num}_M1")
+                                draw_interactive_match(col, m, r_num, 1, is_gf=True)
+
+                        else:
+                            # SINGLE ELIMINATION (PAPILLON)
+                            st.markdown("#### 🏆 Saisie des scores de l'Arbre")
+                            num_cols = (total_rounds_wb - 1) * 2 + 1
+                            cols = st.columns(num_cols)
+                            
+                            for r_num in range(1, total_rounds_wb):
+                                col_left = cols[r_num - 1]
+                                col_right = cols[num_cols - r_num]
+                                
+                                col_left.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                col_right.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                
+                                expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                                half_count = expected_count // 2
+                                
+                                # Moitié Gauche
+                                for m_num in range(1, half_count + 1):
+                                    m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
+                                    draw_interactive_match(col_left, m, r_num, m_num)
+                                    
+                                # Moitié Droite
+                                for m_num in range(half_count + 1, expected_count + 1):
+                                    m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
+                                    draw_interactive_match(col_right, m, r_num, m_num)
+                                    
+                            # Centre (Finale)
+                            col_center = cols[total_rounds_wb - 1]
+                            col_center.markdown(f"<h5 style='text-align:center; color:gold;'>👑 Finale</h5>", unsafe_allow_html=True)
+                            m = tier_dict_wb.get(f"WB_R{total_rounds_wb}_M1")
+                            draw_interactive_match(col_center, m, total_rounds_wb, 1, is_gf=True)
 
                     st.divider()
                     st.info("Une fois la Grande Finale jouée et validée, vous pourrez clôturer l'événement.")
@@ -2541,7 +2583,6 @@ elif page == "🏟️ Grand Tournoi":
 
                 elif selected_t["status"] == "completed":
                     st.success("🏁 Ce tournoi est terminé et archivé.")
-                    st.info("Le système de distribution des médailles pour le Top 3 sera connecté ici prochainement !")
                 
 
 elif page == "⚙️ Paramètres":
