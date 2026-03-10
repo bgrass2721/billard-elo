@@ -521,6 +521,24 @@ class DBManager:
                 "player2_id": pair[1],
                 "status": "pending"
             })
+
+        # --- AJOUT DE LA PETITE FINALE (Si Single Elimination) ---
+        t_data = self.supabase.table("grand_tournaments").select("format").eq("id", tournament_id).execute().data
+        if t_data and "single" in t_data[0].get("format", ""):
+            import math
+            nb_matches_r1 = len(selections)
+            total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
+            matches_to_insert.append({
+                "tournament_id": tournament_id,
+                "bracket_match_id": f"WB_R{total_rounds_wb}_M2", # M2 = Le 2ème match du dernier tour (Petite Finale)
+                "status": "pending",
+                "tier": "bracket"
+            })
+
+        # --- Fin de l'ajout ---
+        
+        if matches_to_insert:
+            self.supabase.table("gt_matches").insert(matches_to_insert).execute()
             
         if matches_to_insert:
             self.supabase.table("gt_matches").insert(matches_to_insert).execute()
