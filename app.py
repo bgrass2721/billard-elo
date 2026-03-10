@@ -2542,36 +2542,28 @@ elif page == "🏟️ Grand Tournoi":
                                 draw_interactive_match(col, m, r_num, 1, is_gf=True)
 
                         else:
-                            # SINGLE ELIMINATION (PAPILLON)
-                            st.markdown("#### 🏆 Saisie des scores de l'Arbre")
-                            num_cols = (total_rounds_wb - 1) * 2 + 1
-                            cols = st.columns(num_cols)
+                            # SINGLE ELIMINATION (Saisie Verticale Propre)
+                            st.markdown("#### ✏️ Saisie des scores de l'Arbre")
                             
-                            for r_num in range(1, total_rounds_wb):
-                                col_left = cols[r_num - 1]
-                                col_right = cols[num_cols - r_num]
+                            # On boucle sur chaque tour, de gauche à droite
+                            for r_num in range(1, total_rounds_wb + 1):
+                                is_finale = (r_num == total_rounds_wb)
+                                titre_tour = "👑 Finale" if is_finale else f"Tour {r_num}"
                                 
-                                col_left.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
-                                col_right.markdown(f"<h5 style='text-align:center; color:#ccc;'>Tour {r_num}</h5>", unsafe_allow_html=True)
+                                st.markdown(f"##### {titre_tour}")
                                 
                                 expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
-                                half_count = expected_count // 2
                                 
-                                # Moitié Gauche
-                                for m_num in range(1, half_count + 1):
+                                # On crée des rangées de 3 colonnes max pour que ça reste toujours large et lisible
+                                cols_per_row = min(3, expected_count) if expected_count > 1 else 1
+                                cols = st.columns(cols_per_row)
+                                
+                                for m_num in range(1, expected_count + 1):
+                                    col = cols[(m_num - 1) % cols_per_row]
                                     m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
-                                    draw_interactive_match(col_left, m, r_num, m_num)
-                                    
-                                # Moitié Droite
-                                for m_num in range(half_count + 1, expected_count + 1):
-                                    m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
-                                    draw_interactive_match(col_right, m, r_num, m_num)
-                                    
-                            # Centre (Finale)
-                            col_center = cols[total_rounds_wb - 1]
-                            col_center.markdown(f"<h5 style='text-align:center; color:gold;'>👑 Finale</h5>", unsafe_allow_html=True)
-                            m = tier_dict_wb.get(f"WB_R{total_rounds_wb}_M1")
-                            draw_interactive_match(col_center, m, total_rounds_wb, 1, is_gf=True)
+                                    draw_interactive_match(col, m, r_num, m_num, is_gf=is_finale)
+                                
+                                st.write("") # Petit espace entre chaque tour
 
                     st.divider()
                     st.info("Une fois la Grande Finale jouée et validée, vous pourrez clôturer l'événement.")
