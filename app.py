@@ -1812,13 +1812,13 @@ elif page == "🏟️ Grand Tournoi":
                     def render_css_bracket(prefix, title):
                         tier_matches = [m for m in matches_brk if m["bracket_match_id"].startswith(prefix)]
                         tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
-                        
-                        # Fonction interne magique : Génère le code HTML d'un match
+
                         # Fonction interne magique : Génère le code HTML d'un match
                         def get_match_card(r_num, m_num, is_gf=False, is_pf=False):
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
                             
+                            # On force le fond sombre pour tout le monde
                             bg_color = "#1E1E28"
                             border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
                             
@@ -1831,20 +1831,26 @@ elif page == "🏟️ Grand Tournoi":
                                 s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                 
                                 if m["status"] == "completed":
+                                    # Définition des couleurs précieuses froids et métalliques
+                                    podium_1_c = "#FFD700" # Gold
+                                    podium_2_c = "#E0FFFF" # Cool Luminous Cyan for 2nd
+                                    podium_3_c = "#CD7F32" # Bronze
+                                    
                                     if is_gf:
-                                        # Grande Finale : Or (Vainqueur) et Argent (Perdant), les deux en GRAS
-                                        w1 = "bold; color: #FFD700;" if s1 > s2 else "bold; color: #E0E0E0;"
-                                        w2 = "bold; color: #FFD700;" if s2 > s1 else "bold; color: #E0E0E0;"
-                                        c1_score = "#FFD700" if s1 > s2 else "#E0E0E0"
-                                        c2_score = "#FFD700" if s2 > s1 else "#E0E0E0"
+                                        # Grande Finale: Gold (Vainqueur) et Cool Cyan (Argenté), les deux en GRAS
+                                        w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
+                                        w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
+                                        # Le score du podium prend aussi la couleur de la médaille
+                                        c1_score = podium_1_c if s1 > s2 else podium_2_c
+                                        c2_score = podium_1_c if s2 > s1 else podium_2_c
                                     elif is_pf:
-                                        # Petite Finale : Bronze (Vainqueur en gras) et Gris (Perdant normal)
-                                        w1 = "bold; color: #CD7F32;" if s1 > s2 else "normal; color: #888;"
-                                        w2 = "bold; color: #CD7F32;" if s2 > s1 else "normal; color: #888;"
-                                        c1_score = "#CD7F32" if s1 > s2 else "#888"
-                                        c2_score = "#CD7F32" if s2 > s1 else "#888"
+                                        # Petite Finale: Bronze (Vainqueur en gras) et Gris (Perdant normal)
+                                        w1 = f"bold; color: {podium_3_c};" if s1 > s2 else "normal; color: #888;"
+                                        w2 = f"bold; color: {podium_3_c};" if s2 > s1 else "normal; color: #888;"
+                                        c1_score = podium_3_c if s1 > s2 else "#888"
+                                        c2_score = podium_3_c if s2 > s1 else "#888"
                                     else:
-                                        # Match normal : Blanc (Vainqueur en gras) et Gris (Perdant normal)
+                                        # Match normal: Blanc (Vainqueur en gras) et Gris (Perdant normal)
                                         w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                         w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
                                         c1_score = "#4CAF50" if s1 > s2 else "#888" # Le score du gagnant en vert
@@ -2404,17 +2410,25 @@ elif page == "🏟️ Grand Tournoi":
                                         s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                         
                                         if m["status"] == "completed":
+                                            # Palette de couleurs froides et métalliques
+                                            podium_1_c = "#FFD700" # Gold
+                                            podium_2_c = "#E0FFFF" # Cool Luminous Cyan for 2nd
+                                            podium_3_c = "#CD7F32" # Bronze
+                                            
                                             if is_gf:
-                                                w1 = "bold; color: #FFD700;" if s1 > s2 else "bold; color: #E0E0E0;"
-                                                w2 = "bold; color: #FFD700;" if s2 > s1 else "bold; color: #E0E0E0;"
-                                                c1_score = "#FFD700" if s1 > s2 else "#E0E0E0"
-                                                c2_score = "#FFD700" if s2 > s1 else "#E0E0E0"
+                                                # Grande Finale: Gold et Cool Cyan, tous les deux en GRAS
+                                                w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
+                                                w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
+                                                c1_score = podium_1_c if s1 > s2 else podium_2_c
+                                                c2_score = podium_1_c if s2 > s1 else podium_2_c
                                             elif is_pf:
-                                                w1 = "bold; color: #CD7F32;" if s1 > s2 else "normal; color: #888;"
-                                                w2 = "bold; color: #CD7F32;" if s2 > s1 else "normal; color: #888;"
-                                                c1_score = "#CD7F32" if s1 > s2 else "transparent"
-                                                c2_score = "#CD7F32" if s2 > s1 else "transparent"
+                                                # Petite Finale: Bronze (Vainqueur gras) et normal (perdant)
+                                                w1 = f"bold; color: {podium_3_c};" if s1 > s2 else "normal; color: #888;"
+                                                w2 = f"bold; color: {podium_3_c};" if s2 > s1 else "normal; color: #888;"
+                                                c1_score = podium_3_c if s1 > s2 else "transparent"
+                                                c2_score = podium_3_c if s2 > s1 else "transparent"
                                             else:
+                                                # Match normal: Blanc (Vainqueur gras) et normal (perdant)
                                                 w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                                 w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
                                                 c1_score = "#4CAF50" if s1 > s2 else "transparent"
