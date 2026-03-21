@@ -578,6 +578,7 @@ menu_options = [
     "🎯 Déclarer un match",
     "🆚 Comparateur de joueurs",
     "📑 Mes validations",
+    "🧠 Entraînements",
     "🍻 Weekly Fun",
     "🏟️ Grand Tournoi",
     "📢 Nouveautés",
@@ -722,12 +723,11 @@ elif page == "👤 Profils Joueurs":
     st.subheader("🏆 Le Panthéon")
     gt_stats = db.get_user_gt_stats(target_user["id"])
     
-    # On filtre pour ne garder que le podium (1er, 2e, 3e)
-    podium_finishes = [s for s in gt_stats if s.get('final_rank') in [1, 2, 3]]
-    
-    if not podium_finishes:
-        st.caption("Aucune médaille en Grand Tournoi pour le moment.")
+    if not gt_stats:
+        st.caption("Aucune participation en Grand Tournoi pour le moment.")
     else:
+        # On filtre pour les compteurs du podium
+        podium_finishes = [s for s in gt_stats if s.get('final_rank') in [1, 2, 3]]
         gt_gold = sum(1 for s in podium_finishes if s['final_rank'] == 1)
         gt_silver = sum(1 for s in podium_finishes if s['final_rank'] == 2)
         gt_bronze = sum(1 for s in podium_finishes if s['final_rank'] == 3)
@@ -736,6 +736,23 @@ elif page == "👤 Profils Joueurs":
         if gt_gold > 0: c1.markdown(f"### 🥇 Or : {gt_gold}")
         if gt_silver > 0: c2.markdown(f"### 🥈 Argent : {gt_silver}")
         if gt_bronze > 0: c3.markdown(f"### 🥉 Bronze : {gt_bronze}")
+
+        # Le détail du palmarès (Historique complet)
+        with st.expander("📜 Palmarès détaillé (Grands Tournois)"):
+            # On trie par rang (les meilleures perfs en premier)
+            for s in sorted(gt_stats, key=lambda x: x.get('final_rank', 999)):
+                rank = s.get('final_rank')
+                t_name = s.get('grand_tournaments', {}).get('name', 'Tournoi Inconnu')
+                
+                if rank == 1: emoji = "🥇"
+                elif rank == 2: emoji = "🥈"
+                elif rank == 3: emoji = "🥉"
+                else: emoji = "🎖️" # Médaille d'honneur pour le reste du tableau
+                
+                if rank in [1, 2, 3]:
+                    st.write(f"{emoji} **{rank}{'er' if rank==1 else 'ème'}** au *{t_name}*")
+                else:
+                    st.write(f"{emoji} **Top {rank}** au *{t_name}*")
 
     # ==========================================
     # 🏅 VITRINE 2 : SUCCÈS DE CARRIÈRE (Anciens badges)
@@ -2792,13 +2809,19 @@ elif page == "🏟️ Grand Tournoi":
 
                     st.divider()
                     st.info("Une fois les Finales jouées et validées, vous pourrez clôturer l'événement.")
-                    if st.button("🏆 Clôturer le Tournoi (Archiver)", type="primary"):
-                        db.update_tournament_status(selected_t["id"], "completed")
-                        st.success("Tournoi terminé et archivé !")
-                        st.balloons()
-                        st.rerun()
+                    st.warning("⚠️ Attention : Cette action va générer automatiquement le classement final (Top 1, Top 2, Top 3, Top 5, Top 9...) pour tous les joueurs en fonction de leur parcours dans l'arbre, puis archivera le tournoi.")
+                    
+                    if st.button("🏆 Calculer les classements et Archiver", type="primary"):
+                        success, msg = db.calculate_and_save_final_rankings(selected_t["id"], selected_t["format"])
+                        if success:
+                            st.success(msg)
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
-                elif selected_t["status"] == "completed":
+                # J'ai rajouté "archived" ici au cas où pour être sûr que ça s'affiche bien une fois clôturé
+                elif selected_t["status"] in ["completed", "archived"]:
                     st.success("🏁 Ce tournoi est terminé et archivé.")
                 
 
@@ -3049,3 +3072,183 @@ elif page == "🍻 Weekly Fun":
                                 st.rerun()
                             else:
                                 st.error(msg)
+
+elif page == "🧠 Entraînements":
+    st.header("🧠 Sessions d'Entraînement et Cours")
+    
+    is_guest = st.session_state.get("guest_mode", False)
+    is_admin = not is_guest and user.get("is_admin", False)
+
+    # ==========================================
+    # 🛠️ VUE ADMIN : CRÉATION & GESTION
+    # ==========================================
+    if is_admin:
+        with st.expander("🛠️ Zone Admin : Planifier un nouvel entraînement"):
+            st.info("Planifier une nouvelle session placera automatiquement la précédente dans les archives.")
+            
+            with st.form("form_create_training"):
+                t_name = st.text_input("Thème de la session", placeholder="Ex: Masterclass sur les effets, Entraînement Défense...")
+                t_desc = st.text_area("Description", placeholder="Ex: On travaillera les replacements de base...")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    t_max_players = st.number_input("Nombre de places maximum", min_value=2, max_value=32, value=8, step=1)
+                with col2:
+                    import datetime
+                    t_date = st.date_input("Date de la session", value=datetime.date.today())
+                
+                submitted_training = st.form_submit_button("Publier l'entraînement 🚀")
+                
+                if submitted_training:
+                    if not t_name:
+                        st.error("⚠️ Le thème de la session est obligatoire.")
+                    else:
+                        success, msg = db.create_training(t_name, t_desc, t_max_players, t_date)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                            
+        st.divider()
+
+    # ==========================================
+    # 📺 VUE SPECTATEUR / JOUEUR : LA SESSION EN COURS
+    # ==========================================
+    current_training = db.get_current_training()
+    
+    if not current_training:
+        st.info("🛌 Aucune session d'entraînement n'est planifiée pour le moment.")
+    else:
+        # Formatage propre
+        formatted_date = pd.to_datetime(current_training['event_date']).strftime('%d/%m/%Y')
+        description_text = current_training.get('description', '')
+        if not description_text:
+            description_text = "Cours libre, programme défini sur place."
+
+        # Bannière bleue (Thème apprentissage)
+        st.markdown(
+            f"""
+<div style='background-color: #2b2b36; padding: 25px; border-radius: 12px; border-left: 6px solid #3498db; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 25px;'>
+    <h2 style='margin-top: 0; margin-bottom: 15px; color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
+        🧠 {current_training['name']}
+    </h2>
+    <div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>
+        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+            📅 Date : <span style='color: #ffffff; font-weight: bold;'>{formatted_date}</span>
+        </div>
+        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+            🎟️ Places : <span style='color: #ffffff; font-weight: bold;'>{current_training['max_players']} max</span>
+        </div>
+    </div>
+    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;'>
+        <i>{description_text}</i>
+    </div>
+</div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        # --- 👥 SYSTÈME D'INSCRIPTION ---
+        st.subheader("👥 Élèves Inscrits")
+        
+        participants = db.get_training_participants(current_training['id'])
+        max_p = current_training['max_players']
+
+        # --- MODÉRATION ADMIN ---
+        if is_admin:
+            with st.expander("🛠️ Modération de la liste"):
+                col_add, col_rem = st.columns(2)
+                
+                with col_add:
+                    st.write("**Ajouter un joueur**")
+                    all_p_res = db.get_leaderboard()
+                    if all_p_res.data:
+                        player_names = [p['username'] for p in all_p_res.data]
+                        target_name = st.selectbox("Sélectionner un joueur", player_names, key="admin_add_t_select")
+                        if st.button("Ajouter manuellement"):
+                            target_id = next(p['id'] for p in all_p_res.data if p['username'] == target_name)
+                            db.register_training(current_training['id'], target_id)
+                            st.success(f"Ajout de {target_name} réussi !")
+                            st.rerun()
+                
+                with col_rem:
+                    st.write("**Retirer un joueur**")
+                    if not participants:
+                        st.write("Aucun joueur à retirer.")
+                    else:
+                        current_p_names = [p.get('profiles', {}).get('username', 'Inconnu') for p in participants]
+                        rem_name = st.selectbox("Joueur à retirer", current_p_names, key="admin_rem_t_select")
+                        if st.button("Retirer de la session", type="secondary"):
+                            rem_id = next(p['user_id'] for p in participants if p.get('profiles', {}).get('username') == rem_name)
+                            db.admin_remove_training_participant(current_training['id'], rem_id)
+                            st.warning(f"{rem_name} a été retiré de la liste.")
+                            st.rerun()
+
+        # Liste Principale et File d'attente
+        main_list = participants[:max_p]
+        wait_list = participants[max_p:]
+        
+        is_registered = False
+        if not is_guest:
+            is_registered = any(p['user_id'] == user['id'] for p in participants)
+        
+        col_btn, _ = st.columns([1, 2])
+        with col_btn:
+            if is_guest:
+                st.info("🔒 Connectez-vous pour participer.")
+            else:
+                if is_registered:
+                    if st.button("❌ Se désinscrire de la session", type="secondary", use_container_width=True):
+                        db.unregister_training(current_training['id'], user['id'])
+                        st.rerun()
+                else:
+                    btn_text = "✅ S'inscrire au cours" if len(participants) < max_p else "⏳ Rejoindre la file d'attente"
+                    if st.button(btn_text, type="primary", use_container_width=True):
+                        db.register_training(current_training['id'], user['id'])
+                        st.rerun()
+
+        st.write("")
+        
+        # Affichage des listes
+        col_main, col_wait = st.columns(2)
+        with col_main:
+            st.markdown(f"#### 📋 Liste Principale ({len(main_list)}/{max_p})")
+            if not main_list:
+                st.write("Aucun inscrit pour le moment.")
+            else:
+                for i, p in enumerate(main_list):
+                    username = p.get('profiles', {}).get('username', 'Inconnu')
+                    if not is_guest and p['user_id'] == user['id']:
+                        st.markdown(f"**{i+1}. {username} (Vous)**")
+                    else:
+                        st.markdown(f"{i+1}. {username}")
+                        
+        with col_wait:
+            st.markdown(f"#### ⏳ Liste d'Attente ({len(wait_list)})")
+            if not wait_list:
+                st.caption("Personne en attente.")
+            else:
+                for i, p in enumerate(wait_list):
+                    username = p.get('profiles', {}).get('username', 'Inconnu')
+                    if not is_guest and p['user_id'] == user['id']:
+                        st.markdown(f"**{max_p + i + 1}. {username} (Vous)**")
+                    else:
+                        st.caption(f"{max_p + i + 1}. {username}")
+
+        # ==========================================
+        # 👑 PANNEAU DE CONTRÔLE ADMIN
+        # ==========================================
+        if is_admin:
+            st.divider()
+            st.subheader("👑 Administration de la session")
+            
+            with st.expander("🔒 Clôturer la session d'entraînement", expanded=False):
+                st.info("L'entraînement est terminé ? Vous pouvez l'archiver pour faire place au suivant. (Cette action n'a pas d'impact sur le classement des joueurs).")
+                if st.button("Archiver l'entraînement", type="primary"):
+                    success, msg = db.close_training(current_training['id'])
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)

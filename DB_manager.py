@@ -814,7 +814,7 @@ class DBManager:
             # Adapte le nom de la table des tournois (tournaments ou gt_tournaments) si besoin
             res = (
                 self.supabase.table("gt_participants")
-                .select("final_rank, tournaments(name)")
+                .select("final_rank, grand_tournaments(name)(name)")
                 .eq("user_id", user_id)
                 .not_.is_("final_rank", "null")
                 .execute()
@@ -892,45 +892,48 @@ class DBManager:
             
             is_double = "double" in t_format
             
+            # --- LOGIQUE SIMPLE ÉLIMINATION ---
+            # --- LOGIQUE SIMPLE ÉLIMINATION ---
             if not is_double:
-                # --- SIMPLE ÉLIMINATION ---
-                # Ex: WB_R1_M1 (1/32), WB_R2_M1 (1/16), WB_R3_M1 (1/8), WB_R4_M1 (1/4), WB_R5_M1 (Demies), WB_R6_M1 (Finale)
-                # Le nombre de rounds dépend du format (32, 64). On va plutôt chercher la "Finale" (le WB_ match avec le plus grand R).
+                wb_matches = [m for m in matches if m.get("bracket_match_id") and m["bracket_match_id"].startswith("WB_")]
+                if not wb_matches: return False, "Erreur structurelle de l'arbre WB."
                 
-                wb_matches = [m for m in bracket_matches if m["bracket_match_id"] and m["bracket_match_id"].startswith("WB_")]
+                max_r_str = max([m["bracket_match_id"].split("_")[1] for m in wb_matches])
+                max_r = int(max_r_str[1:]) # Numéro du round final
                 
-                if wb_matches:
-                    # Trouver le round maximum (La finale)
-                    max_r = max([int(m["bracket_match_id"].split("_")[1][1:]) for m in wb_matches])
+                # NOUVEAU : On trie les matchs pour lire la Finale EN PREMIER
+                wb_matches = sorted(wb_matches, key=lambda x: int(x["bracket_match_id"].split("_")[1][1:]), reverse=True)
+                
+                for m in wb_matches:
+                    parts = m["bracket_match_id"].split("_")
+                    current_r = int(parts[1][1:])
+                    m_num = int(parts[2][1:])
                     
-                    for m in wb_matches:
-                        r_num = int(m["bracket_match_id"].split("_")[1][1:])
-                        w_id, l_id = m["winner_id"], m["loser_id"]
-                        
-                        if r_num == max_r:
-                            # C'est la Grande Finale
-                            if w_id: final_ranks[w_id] = 1
-                            if l_id: final_ranks[l_id] = 2
-                        elif r_num == max_r - 1:
-                            # Demies (Les perdants sont "en attente" de la petite finale, ou font Top 3 ex-aequo)
-                            # Si on n'a pas de petite finale, ils sont 3e ex-aequo.
-                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 3
-                        elif r_num == max_r - 2:
-                            # Quarts (Perdants = Top 5)
-                            if l_id: final_ranks[l_id] = 5
-                        elif r_num == max_r - 3:
-                            # Huitièmes (Perdants = Top 9)
-                            if l_id: final_ranks[l_id] = 9
-                        elif r_num == max_r - 4:
-                            # Seizièmes (Perdants = Top 17)
-                            if l_id: final_ranks[l_id] = 17
-                
-                # Chercher une éventuelle Petite Finale (ex: "THIRD_PLACE" ou similaire, si tu l'as gérée)
-                # Si tu as une petite finale, elle écrasera le '3' mis par défaut aux perdants des demies.
-                third_place_match = next((m for m in bracket_matches if m["bracket_match_id"] == "THIRD_PLACE"), None)
-                if third_place_match:
-                    if third_place_match["winner_id"]: final_ranks[third_place_match["winner_id"]] = 3
-                    if third_place_match["loser_id"]: final_ranks[third_place_match["loser_id"]] = 4
+                    w_id, l_id = m["winner_id"], m["loser_id"]
+                    
+                    if not l_id: continue # Gestion BYE ou match non fini
+
+                    if current_r == max_r:
+                        if m_num == 1:
+                            # C'est la GRANDE FINALE (M1)
+                            if w_id and w_id not in final_ranks: final_ranks[w_id] = 1 # Or
+                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 2 # Argent
+                        elif m_num == 2:
+                            # C'est la PETITE FINALE (M2)
+                            if w_id and w_id not in final_ranks: final_ranks[w_id] = 3 # Bronze
+                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 4 # Chocolat
+                            
+                    else:
+                        # PROTECTION : On n'écrase pas une place déjà donnée par une finale !
+                        if l_id and l_id not in final_ranks:
+                            if current_r == max_r - 1:
+                                final_ranks[l_id] = 3 # Ex-aequo s'il n'y a pas eu de Petite Finale
+                            elif current_r == max_r - 2:
+                                final_ranks[l_id] = 5
+                            elif current_r == max_r - 3:
+                                final_ranks[l_id] = 9
+                            elif current_r == max_r - 4:
+                                final_ranks[l_id] = 17
 
             else:
                 # --- DOUBLE ÉLIMINATION ---
@@ -974,9 +977,88 @@ class DBManager:
                 self.supabase.table("gt_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
 
             # 4. On passe le tournoi en "completed"
-            self.supabase.table("tournaments").update({"status": "completed"}).eq("id", tournament_id).execute()
+            self.supabase.table("grand_tournaments").update({"status": "completed"}).eq("id", tournament_id).execute()
 
             return True, "Tournoi clôturé et classements générés avec succès !"
             
         except Exception as e:
             return False, f"Erreur lors du calcul des classements : {e}"
+
+    # ==========================================
+    # 🧠 GESTION DES ENTRAÎNEMENTS (COURS)
+    # ==========================================
+    def create_training(self, name, description, max_players, event_date):
+        """Crée un nouvel entraînement et archive l'ancien."""
+        try:
+            # On archive l'ancien s'il y en a un
+            self.supabase.table("trainings").update({"status": "completed"}).eq("status", "active").execute()
+            
+            # On crée le nouveau
+            data = {
+                "name": name,
+                "description": description,
+                "max_players": max_players,
+                "event_date": event_date.isoformat(),
+                "status": "active"
+            }
+            res = self.supabase.table("trainings").insert(data).execute()
+            return True, "L'entraînement a été publié avec succès !"
+        except Exception as e:
+            return False, f"Erreur lors de la création de l'entraînement : {e}"
+
+    def get_current_training(self):
+        """Récupère l'entraînement actuellement actif."""
+        try:
+            res = self.supabase.table("trainings").select("*").eq("status", "active").order("created_at", desc=True).limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            return None
+
+    def get_training_participants(self, training_id):
+        """Récupère la liste des inscrits pour un entraînement, triée par ordre d'inscription."""
+        try:
+            res = (
+                self.supabase.table("training_participants")
+                .select("*, profiles!inner(username)")
+                .eq("training_id", training_id)
+                .order("registered_at", desc=False)
+                .execute()
+            )
+            return res.data if res.data else []
+        except Exception as e:
+            return []
+
+    def register_training(self, training_id, user_id):
+        """Inscrit un joueur à l'entraînement."""
+        try:
+            self.supabase.table("training_participants").insert({
+                "training_id": training_id,
+                "user_id": user_id
+            }).execute()
+            return True
+        except Exception as e:
+            return False
+
+    def unregister_training(self, training_id, user_id):
+        """Désinscrit un joueur de l'entraînement."""
+        try:
+            self.supabase.table("training_participants").delete().eq("training_id", training_id).eq("user_id", user_id).execute()
+            return True
+        except Exception as e:
+            return False
+
+    def admin_remove_training_participant(self, training_id, user_id):
+        """Permet à l'admin de virer un joueur de l'entraînement."""
+        try:
+            self.supabase.table("training_participants").delete().eq("training_id", training_id).eq("user_id", user_id).execute()
+            return True
+        except Exception as e:
+            return False
+
+    def close_training(self, training_id):
+        """Clôture l'entraînement sans rien distribuer (pas de palmarès)."""
+        try:
+            self.supabase.table("trainings").update({"status": "completed"}).eq("id", training_id).execute()
+            return True, "Entraînement clôturé et archivé avec succès !"
+        except Exception as e:
+            return False, f"Erreur lors de la clôture : {e}"
