@@ -3166,11 +3166,14 @@ elif page == "🧠 Entraînements":
                     if all_p_res.data:
                         player_names = [p['username'] for p in all_p_res.data]
                         target_name = st.selectbox("Sélectionner un joueur", player_names, key="admin_add_t_select")
-                        if st.button("Ajouter manuellement"):
+                        if st.button("Ajouter manuellement", key="btn_admin_add_training"):
                             target_id = next(p['id'] for p in all_p_res.data if p['username'] == target_name)
-                            db.register_training(current_training['id'], target_id)
-                            st.success(f"Ajout de {target_name} réussi !")
-                            st.rerun()
+                            success = db.register_training(current_training['id'], target_id)
+                            if success:
+                                st.success(f"Ajout de {target_name} réussi !")
+                                st.rerun()
+                            else:
+                                st.error("Erreur lors de l'ajout.")
                 
                 with col_rem:
                     st.write("**Retirer un joueur**")
