@@ -1150,3 +1150,12 @@ class DBManager:
                 
         except Exception as e:
             return False, f"Erreur de l'arbitre : {e}"
+
+    def get_past_weekly_tournaments(self):
+        """Récupère la liste de tous les Weekly Funs terminés (archivés)."""
+        try:
+            # On cherche tous les tournois avec le statut "completed", triés du plus récent au plus ancien
+            res = self.supabase.table("weekly_tournaments").select("*").eq("status", "closed").order("event_date", desc=True).execute()
+            return res.data if res.data else []
+        except Exception as e:
+            return []

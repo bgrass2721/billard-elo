@@ -10,12 +10,133 @@ import pytz
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
 
-# 1. Configuration de la page
-st.set_page_config(
-    page_title="🎱 BlackBall Compétition",
-    page_icon="🎱",
-    layout="centered",
-)
+# ==========================================
+# 🎨 CHIRURGIE ESTHÉTIQUE DE L'APPLICATION
+# ==========================================
+
+# 1. Configuration de la page (Doit être en tout premier)
+st.set_page_config(page_title="Snook'R Club", page_icon="🎱", layout="wide")
+
+# 2. Injection de Custom CSS (La magie opère ici)
+st.markdown("""
+<style>
+    /* 1. Chargement d'une police moderne */
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+
+    html, body, [class*="css"]  {
+        font-family: 'Poppins', sans-serif;
+        color: #E0E0E0;
+    }
+
+    /* 2. Changement de la couleur de fond générale */
+    .stApp {
+        background-color: #101216;
+    }
+
+    /* 3. Style des Titres (H1, H2, H3) */
+    h1, h2, h3 {
+        color: white !important;
+        font-weight: 700 !important;
+        margin-bottom: 20px !important;
+    }
+    
+    /* Titre d'accent avec néon vert */
+    .snookr-title {
+        color: #00E676;
+        text-shadow: 0 0 10px rgba(0,230,118,0.5);
+    }
+
+    /* 4. Style des conteneurs (Expanders, Cartes) */
+    .stExpander {
+        background-color: #1E2228 !important;
+        border: 1px solid #333 !important;
+        border-radius: 12px !important;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        margin-bottom: 15px;
+    }
+    
+    /* En-tête de l'expander */
+    .stExpander summary {
+        background-color: #252A32 !important;
+        padding: 10px 15px !important;
+        font-weight: 600;
+        color: white;
+    }
+
+    /* 5. Style du Menu Déroulant (Selectbox) */
+    .stSelectbox div[data-baseweb="select"] {
+        background-color: #1E2228 !important;
+        border: 1px solid #444 !important;
+        border-radius: 8px !important;
+    }
+    .stSelectbox div[data-baseweb="select"] * {
+        color: white !important;
+    }
+
+    /* 6. STYLE DES TABLEAUX DE CLASSEMENT (HTML CUSTOM) */
+    .snookr-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+        border-radius: 8px;
+        overflow: hidden;
+        background-color: #1E2228;
+    }
+    
+    .snookr-table thead tr {
+        background-color: #252A32;
+        color: #888;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.9em;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    .snookr-table th, .snookr-table td {
+        padding: 15px;
+        border-bottom: 1px solid #333;
+    }
+    
+    .snookr-table tbody tr {
+        transition: background-color 0.2s;
+    }
+    
+    .snookr-table tbody tr:last-of-type {
+        border-bottom: 2px solid #00E676;
+    }
+    
+    .snookr-table tbody tr:hover {
+        background-color: rgba(0,230,118, 0.05);
+    }
+    
+    /* Style spécial pour le numéro de rang */
+    .rank-cell {
+        font-weight: 700;
+        color: white;
+        width: 60px;
+        text-align: center;
+    }
+    
+    /* Badges pour podium */
+    .badge {
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 28px;
+        font-size: 1.1em;
+        margin-right: 5px;
+    }
+    .badge-gold { background: linear-gradient(135deg, #FFD700, #F1C40F); color: #212121; }
+    .badge-silver { background: linear-gradient(135deg, #E0FFFF, #B0BEC5); color: #212121; }
+    .badge-bronze { background: linear-gradient(135deg, #CD7F32, #A1887F); color: white; }
+    .badge-plain { color: #888; font-weight: normal; }
+
+</style>
+""", unsafe_allow_html=True)
 
 
 def get_badges_html(player, matches_history):
@@ -548,7 +669,11 @@ except StopIteration:
     rank_2v2 = "-"
 
 # --- BARRE LATÉRALE ---
-st.sidebar.title("🎱 BlackBall")
+st.sidebar.markdown("""
+    <div style='text-align: center; padding: 10px 0;'>
+        <h1 style='font-size: 2.5em; margin: 0;'>🎱 <span class='snookr-title'>Snook'R</span></h1>
+    </div>
+""", unsafe_allow_html=True)
 st.sidebar.write(f"Joueur : **{user['username']}**")
 
 st.sidebar.divider()
@@ -3203,6 +3328,71 @@ elif page == "🍻 Weekly Fun":
                                 st.rerun()
                             else:
                                 st.error(msg)
+    # ==========================================
+    # 🗄️ SECTION ARCHIVES : LES ANCIENS WEEKLY FUNS
+    # ==========================================
+    st.divider()
+    st.header("🗄️ Les Archives du Fun")
+    
+    past_weeklys = db.get_past_weekly_tournaments()
+    
+    if not past_weeklys:
+        st.info("Aucune archive pour le moment. Le premier Weekly Fun est encore en cours ou n'a pas commencé !")
+    else:
+        # 1. Création du menu déroulant
+        import pandas as pd
+        weekly_options = {}
+        for pt in past_weeklys:
+            date_str = pd.to_datetime(pt['event_date']).strftime('%d/%m/%Y')
+            # Format du nom dans le menu : "25/03/2026 - Le roi de la visée"
+            weekly_options[f"{date_str} - {pt['name']}"] = pt
+            
+        selected_weekly_name = st.selectbox("Sélectionnez un ancien tournoi :", list(weekly_options.keys()))
+        selected_weekly = weekly_options[selected_weekly_name]
+        
+        # 2. Affichage des détails du tournoi sélectionné
+        st.markdown(f"**Description :** *{selected_weekly.get('description', 'Aucune règle spéciale.')}*")
+        
+        p_participants = db.get_weekly_participants(selected_weekly['id'])
+        
+        if not p_participants:
+            st.write("Aucun joueur n'avait participé à cette édition.")
+        else:
+            p_participants_sorted = sorted(p_participants, key=lambda x: x.get('final_rank', 999))
+            
+            st.markdown("### 🏆 Classement Final")
+            
+            # --- GÉNÉRATION DU TABLEAU HTML CUSTOM ---
+            html_table = "<table class='snookr-table'>"
+            html_table += "<thead><tr><th>Rang</th><th>Joueur</th></tr></thead>"
+            html_table += "<tbody>"
+            
+            for index, p in enumerate(p_participants_sorted, start=1):
+                p_name = p.get('profiles', {}).get('username', 'Inconnu')
+                display_rank = p.get('final_rank', index)
+                
+                # Définition du badge de médaille
+                badge_html = ""
+                if display_rank == 1:
+                    badge_html = "<span class='badge badge-gold'>🥇</span>"
+                elif display_rank == 2:
+                    badge_html = "<span class='badge badge-silver'>🥈</span>"
+                elif display_rank == 3:
+                    badge_html = "<span class='badge badge-bronze'>🥉</span>"
+                else:
+                    badge_html = f"<span class='badge badge-plain'>{display_rank}</span>"
+                
+                # Ajout de la ligne au tableau
+                html_table += f"<tr>"
+                html_table += f"<td class='rank-cell'>{badge_html}</td>"
+                html_table += f"<td style='color: white; font-weight: 600;'>{p_name}</td>"
+                html_table += f"</tr>"
+                
+            html_table += "</tbody></table>"
+            
+            # Injection du tableau HTML dans Streamlit
+            st.markdown(html_table, unsafe_allow_html=True)
+            st.write("") # Petit espace pour respirer
 
 elif page == "🧠 Entraînements":
     st.header("🧠 Sessions d'Entraînement et Cours")
