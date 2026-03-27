@@ -1934,41 +1934,104 @@ elif page == "🏟️ Grand Tournoi":
                                 g_matches = [m for m in matches_grp if m["group_name"] == g]
                                 g_parts = [p for p in parts if p["group_name"] == g]
                                 
-                                # Calcul classement
-                                standings = {}
+                                # 1. On sépare les rounds
+                                max_round = max([m.get("tie_break_round", 0) for m in g_matches]) if g_matches else 0
+                                regular_matches = [m for m in g_matches if m.get("tie_break_round", 0) == 0]
+                                
+                                # 2. CLASSEMENT PHASE RÉGULIÈRE
+                                reg_standings = {}
                                 for p in g_parts:
-                                    standings[p["user_id"]] = {"Nom": all_users_spec.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
+                                    # On ajoute Tie_V et Tie_Diff pour le tri secret !
+                                    reg_standings[p["user_id"]] = {"Nom": all_users_spec.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0, "Tie_V": 0, "Tie_Diff": 0}
                                     
-                                for m in g_matches:
+                                for m in regular_matches:
                                     if m["status"] == "completed":
                                         s1, s2 = m["score1"], m["score2"]
                                         p1, p2 = m["player1_id"], m["player2_id"]
-                                        if p1 in standings:
-                                            if s1 > s2: standings[p1]["V"] += 1
-                                            else: standings[p1]["D"] += 1
-                                            standings[p1]["Diff"] += (s1 - s2)
-                                        if p2 in standings:
-                                            if s2 > s1: standings[p2]["V"] += 1
-                                            else: standings[p2]["D"] += 1
-                                            standings[p2]["Diff"] += (s2 - s1)
+                                        if p1 in reg_standings:
+                                            if s1 > s2: reg_standings[p1]["V"] += 1
+                                            else: reg_standings[p1]["D"] += 1
+                                            reg_standings[p1]["Diff"] += (s1 - s2)
+                                        if p2 in reg_standings:
+                                            if s2 > s1: reg_standings[p2]["V"] += 1
+                                            else: reg_standings[p2]["D"] += 1
+                                            reg_standings[p2]["Diff"] += (s2 - s1)
                                             
-                                sorted_standings = sorted(standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
-                                import pandas as pd
-                                df_standings = pd.DataFrame(sorted_standings)
-                                df_standings.index = df_standings.index + 1
-                                st.dataframe(df_standings, use_container_width=True)
+                                # NOUVEAU : On lit les barrages pour affiner le tri
+                                tie_matches_all = [m for m in g_matches if m.get("tie_break_round", 0) > 0]
+                                for m in tie_matches_all:
+                                    if m["status"] == "completed":
+                                        s1, s2 = m["score1"], m["score2"]
+                                        p1, p2 = m["player1_id"], m["player2_id"]
+                                        if p1 in reg_standings:
+                                            if s1 > s2: reg_standings[p1]["Tie_V"] += 1
+                                            reg_standings[p1]["Tie_Diff"] += (s1 - s2)
+                                        if p2 in reg_standings:
+                                            if s2 > s1: reg_standings[p2]["Tie_V"] += 1
+                                            reg_standings[p2]["Tie_Diff"] += (s2 - s1)
+
+                                # LE TRI MAGIQUE : V régulier -> Diff régulier -> V barrage -> Diff barrage
+                                sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"], x["Tie_V"], x["Tie_Diff"]), reverse=True)
                                 
-                                # Liste des matchs joués/à venir
-                                if g_matches:
-                                    st.markdown("**Matchs :**")
-                                    for m in g_matches:
+                                # On nettoie l'affichage pour ne montrer que les stats régulières
+                                display_reg = [{"Nom": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for x in sorted_reg]
+                                
+                                import pandas as pd
+                                df_reg = pd.DataFrame(display_reg)
+                                df_reg.index = df_reg.index + 1
+                                st.dataframe(df_reg, use_container_width=True)
+
+                                # 3. CLASSEMENT DÉPARTAGE (Si barrages en cours)
+                                if max_round > 0:
+                                    tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
+                                    tie_players = set()
+                                    for m in tie_matches:
+                                        if m["player1_id"]: tie_players.add(m["player1_id"])
+                                        if m["player2_id"]: tie_players.add(m["player2_id"])
+                                        
+                                    tie_standings = {}
+                                    for uid in tie_players:
+                                        tie_standings[uid] = {"Nom": all_users_spec.get(uid, "?"), "V": 0, "D": 0, "Diff": 0}
+                                        
+                                    for m in tie_matches:
+                                        if m["status"] == "completed":
+                                            s1, s2 = m["score1"], m["score2"]
+                                            p1, p2 = m["player1_id"], m["player2_id"]
+                                            if p1 in tie_standings:
+                                                if s1 > s2: tie_standings[p1]["V"] += 1
+                                                else: tie_standings[p1]["D"] += 1
+                                                tie_standings[p1]["Diff"] += (s1 - s2)
+                                            if p2 in tie_standings:
+                                                if s2 > s1: tie_standings[p2]["V"] += 1
+                                                else: tie_standings[p2]["D"] += 1
+                                                tie_standings[p2]["Diff"] += (s2 - s1)
+                                                
+                                    sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
+                                    st.markdown(f"**🔥 Départage (Round {max_round})**")
+                                    df_tie = pd.DataFrame(sorted_tie)
+                                    df_tie.index = df_tie.index + 1
+                                    st.dataframe(df_tie, use_container_width=True)
+
+                                # 4. AFFICHAGE SÉPARÉ DES MATCHS
+                                st.write("")
+                                st.markdown("**Matchs :**")
+                                for r in range(max_round + 1):
+                                    r_matches = [m for m in g_matches if m.get("tie_break_round", 0) == r]
+                                    if not r_matches: continue
+                                    
+                                    if max_round > 0:
+                                        if r == 0:
+                                            st.markdown("🎯 *Phase Régulière*")
+                                        else:
+                                            st.markdown(f"🔥 *Barrages #{r}*")
+                                            
+                                    for m in r_matches:
                                         p1_name = all_users_spec.get(m["player1_id"], "?")
                                         p2_name = all_users_spec.get(m["player2_id"], "?")
                                         if m["status"] == "completed":
-                                            # Affichage visuel du gagnant
-                                            st.markdown(f"**{p1_name}** `{m['score1']} - {m['score2']}` **{p2_name}** ✅")
+                                            st.markdown(f"**{p1_name}** <span style='color:#4CAF50;'>{m['score1']} - {m['score2']}</span> **{p2_name}** ✅", unsafe_allow_html=True)
                                         else:
-                                            st.markdown(f"{p1_name} `vs` {p2_name} ⏳")
+                                            st.markdown(f"**{p1_name}** <span style='color:#888;'>vs</span> **{p2_name}** ⏳", unsafe_allow_html=True)
 
             # --- CAS 3 : ARBRE UNIQUEMENT ---
             if selected_t_spec["status"] in ["bracket", "completed"]:
@@ -2327,56 +2390,124 @@ elif page == "🏟️ Grand Tournoi":
                             g_matches = [m for m in matches if m["group_name"] == g]
                             g_parts = [p for p in participants if p["group_name"] == g]
                             
-                            standings = {}
+                            # 1. On sépare les matchs réguliers des matchs de barrage
+                            max_round = max([m.get("tie_break_round", 0) for m in g_matches]) if g_matches else 0
+                            regular_matches = [m for m in g_matches if m.get("tie_break_round", 0) == 0]
+                            current_round_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
+                            
+                            # ==========================================
+                            # 2. CLASSEMENT DE LA PHASE RÉGULIÈRE (Intouchable !)
+                            # ==========================================
+                            reg_standings = {}
                             for p in g_parts:
-                                standings[p["user_id"]] = {"Nom": all_users.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
+                                reg_standings[p["user_id"]] = {"Nom": all_users.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
                                 
-                            for m in g_matches:
+                            for m in regular_matches:
                                 if m["status"] == "completed":
                                     s1, s2 = m["score1"], m["score2"]
                                     p1, p2 = m["player1_id"], m["player2_id"]
-                                    
-                                    if p1 in standings:
-                                        if s1 > s2: standings[p1]["V"] += 1
-                                        else: standings[p1]["D"] += 1
-                                        standings[p1]["Diff"] += (s1 - s2)
-                                        
-                                    if p2 in standings:
-                                        if s2 > s1: standings[p2]["V"] += 1
-                                        else: standings[p2]["D"] += 1
-                                        standings[p2]["Diff"] += (s2 - s1)
+                                    if p1 in reg_standings:
+                                        if s1 > s2: reg_standings[p1]["V"] += 1
+                                        else: reg_standings[p1]["D"] += 1
+                                        reg_standings[p1]["Diff"] += (s1 - s2)
+                                    if p2 in reg_standings:
+                                        if s2 > s1: reg_standings[p2]["V"] += 1
+                                        else: reg_standings[p2]["D"] += 1
+                                        reg_standings[p2]["Diff"] += (s2 - s1)
                             
-                            sorted_standings = sorted(standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
+                            sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
                             
-                            st.markdown("**Classement Actuel :**")
+                            st.markdown("**📊 Classement Initial (Phase Régulière) :**")
                             import pandas as pd
-                            df_standings = pd.DataFrame(sorted_standings)
-                            df_standings.index = df_standings.index + 1
-                            st.dataframe(df_standings, use_container_width=True)
-                            
+                            df_reg = pd.DataFrame(sorted_reg)
+                            df_reg.index = df_reg.index + 1
+                            st.dataframe(df_reg, use_container_width=True)
+
+                            # ==========================================
+                            # 3. CLASSEMENT DU DÉPARTAGE EN COURS (Optionnel)
+                            # ==========================================
+                            if max_round > 0:
+                                tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
+                                
+                                # On isole uniquement les joueurs concernés par ce barrage
+                                tie_players = set()
+                                for m in tie_matches:
+                                    if m["player1_id"]: tie_players.add(m["player1_id"])
+                                    if m["player2_id"]: tie_players.add(m["player2_id"])
+                                    
+                                tie_standings = {}
+                                for uid in tie_players:
+                                    tie_standings[uid] = {"Nom": all_users.get(uid, "?"), "V": 0, "D": 0, "Diff": 0}
+                                    
+                                for m in tie_matches:
+                                    if m["status"] == "completed":
+                                        s1, s2 = m["score1"], m["score2"]
+                                        p1, p2 = m["player1_id"], m["player2_id"]
+                                        if p1 in tie_standings:
+                                            if s1 > s2: tie_standings[p1]["V"] += 1
+                                            else: tie_standings[p1]["D"] += 1
+                                            tie_standings[p1]["Diff"] += (s1 - s2)
+                                        if p2 in tie_standings:
+                                            if s2 > s1: tie_standings[p2]["V"] += 1
+                                            else: tie_standings[p2]["D"] += 1
+                                            tie_standings[p2]["Diff"] += (s2 - s1)
+                                            
+                                sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
+                                
+                                st.markdown(f"**🔥 Classement du Départage (Round {max_round}) :**")
+                                df_tie = pd.DataFrame(sorted_tie)
+                                df_tie.index = df_tie.index + 1
+                                st.dataframe(df_tie, use_container_width=True)
+
                             st.divider()
                             st.markdown("**Saisie des Matchs :**")
                             
-                            for m in g_matches:
-                                p1_name = all_users.get(m["player1_id"], "?")
-                                p2_name = all_users.get(m["player2_id"], "?")
-                                is_done = m["status"] == "completed"
+                            # 3. Affichage visuel séparé par Round (Régulier vs Barrages)
+                            for r in range(max_round + 1):
+                                r_matches = [m for m in g_matches if m.get("tie_break_round", 0) == r]
+                                if not r_matches: continue
                                 
-                                c1, c2, c3, c4, c5 = st.columns([3, 1, 0.5, 1, 2])
-                                c1.write(f"**{p1_name}** vs **{p2_name}**" + (" ✅" if is_done else ""))
-                                
-                                score1 = c2.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"s1_{m['id']}", label_visibility="collapsed")
-                                c3.write("-")
-                                score2 = c4.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"s2_{m['id']}", label_visibility="collapsed")
-                                
-                                btn_label = "Mettre à jour" if is_done else "Valider"
-                                if c5.button(btn_label, key=f"btn_{m['id']}"):
-                                    if score1 == score2:
-                                        st.error("Il ne peut pas y avoir d'égalité au billard !")
+                                if r == 0:
+                                    st.markdown("🎯 *Phase Régulière*")
+                                else:
+                                    st.markdown(f"🔥 **Matchs de Barrage #{r}**")
+                                    
+                                for m in r_matches:
+                                    p1_name = all_users.get(m["player1_id"], "?")
+                                    p2_name = all_users.get(m["player2_id"], "?")
+                                    is_done = m["status"] == "completed"
+                                    
+                                    c1, c2, c3, c4, c5 = st.columns([3, 1, 0.5, 1, 2])
+                                    c1.write(f"**{p1_name}** vs **{p2_name}**" + (" ✅" if is_done else ""))
+                                    
+                                    score1 = c2.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"s1_{m['id']}", label_visibility="collapsed")
+                                    c3.write("-")
+                                    score2 = c4.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"s2_{m['id']}", label_visibility="collapsed")
+                                    
+                                    btn_label = "Mettre à jour" if is_done else "Valider"
+                                    if c5.button(btn_label, key=f"btn_{m['id']}"):
+                                        if score1 == score2:
+                                            st.error("Il ne peut pas y avoir d'égalité au billard !")
+                                        else:
+                                            success = db.update_gt_match_score(m["id"], score1, score2, m["player1_id"], m["player2_id"])
+                                            if success:
+                                                st.rerun()
+
+                            # 4. LE BOUTON MAGIQUE DE L'ARBITRE
+                            # Il n'apparaît que si tous les matchs du round actuel sont finis
+                            all_done = all(m["status"] == "completed" for m in current_round_matches)
+                            if all_done and current_round_matches:
+                                st.write("")
+                                if st.button(f"🔍 Valider la Poule {g} (Vérifier les égalités)", key=f"check_tie_{g}", type="primary"):
+                                    success, msg = db.check_and_create_tie_breaks(selected_t["id"], g)
+                                    if success:
+                                        if "générés" in msg.lower():
+                                            st.error(msg) # S'affiche en rouge pour alerter l'admin qu'il y a des barrages !
+                                        else:
+                                            st.success(msg) # S'affiche en vert : la poule est saine.
+                                        st.rerun()
                                     else:
-                                        success = db.update_gt_match_score(m["id"], score1, score2, m["player1_id"], m["player2_id"])
-                                        if success:
-                                            st.rerun()
+                                        st.warning(msg)
 
                     # ==========================================
                     # LE TIRAGE AU SORT (TRANSITION VERS L'ARBRE)

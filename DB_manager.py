@@ -1062,3 +1062,91 @@ class DBManager:
             return True, "Entraînement clôturé et archivé avec succès !"
         except Exception as e:
             return False, f"Erreur lors de la clôture : {e}"
+
+    def check_and_create_tie_breaks(self, tournament_id, group_name):
+        """
+        Vérifie s'il y a une égalité critique dans une poule.
+        Si oui, génère la mini-poule de barrage (Round 1, Round 2, etc.).
+        """
+        try:
+            # 1. On récupère tous les matchs de cette poule spécifique
+            res = self.supabase.table("gt_matches").select("*").eq("tournament_id", tournament_id).eq("group_name", group_name).execute()
+            matches = res.data if res.data else []
+            
+            if not matches: return False, "Aucun match."
+            
+            # 2. Quel est le round actuel ? (0 = régulier, 1 = barrage #1, 2 = barrage #2...)
+            current_round = max([m.get("tie_break_round", 0) for m in matches])
+            current_matches = [m for m in matches if m.get("tie_break_round", 0) == current_round]
+            
+            # Si le round actuel n'est pas fini, on ne déclenche pas l'arbitre
+            if any(m["status"] != "completed" for m in current_matches):
+                return False, "Matchs en cours."
+                
+            # 3. Calcul du classement (uniquement sur le round actuel)
+            players_in_round = set()
+            for m in current_matches:
+                if m["player1_id"]: players_in_round.add(m["player1_id"])
+                if m["player2_id"]: players_in_round.add(m["player2_id"])
+                
+            standings = {uid: {"V": 0, "Diff": 0} for uid in players_in_round}
+            for m in current_matches:
+                p1, p2 = m["player1_id"], m["player2_id"]
+                s1, s2 = m["score1"], m["score2"]
+                if p1 and p2:
+                    if s1 > s2: standings[p1]["V"] += 1
+                    elif s2 > s1: standings[p2]["V"] += 1
+                    standings[p1]["Diff"] += (s1 - s2)
+                    standings[p2]["Diff"] += (s2 - s1)
+                    
+            # 4. Tri des joueurs selon leurs scores
+            sorted_uids = sorted(standings.keys(), key=lambda x: (standings[x]["V"], standings[x]["Diff"]), reverse=True)
+            
+            # On regroupe ceux qui ont EXACTEMENT le même score (V et Diff)
+            score_groups = {}
+            for uid in sorted_uids:
+                score = (standings[uid]["V"], standings[uid]["Diff"])
+                if score not in score_groups: score_groups[score] = []
+                score_groups[score].append(uid)
+                
+            # 5. Détection des égalités critiques (Top 1 et Top 2)
+            players_to_tie_break = []
+            current_rank = 1
+            
+            for score, uids in score_groups.items():
+                nb_tied = len(uids)
+                if nb_tied > 1:
+                    # Si l'égalité touche la 1ère ou la 2ème place, BARRAGE !
+                    if current_rank <= 2:
+                        players_to_tie_break.extend(uids)
+                current_rank += nb_tied
+                
+            # S'il n'y a pas d'égalité critique, la poule est validée !
+            if not players_to_tie_break:
+                return True, "Poule validée ! Aucun barrage nécessaire."
+                
+            # 6. Création de la mini-poule de barrage (Round + 1)
+            next_round = current_round + 1
+            import itertools
+            new_matches = []
+            
+            # Chaque joueur à égalité va affronter les autres
+            for p1, p2 in itertools.combinations(players_to_tie_break, 2):
+                new_matches.append({
+                    "tournament_id": tournament_id,
+                    "phase": "group",
+                    "group_name": group_name,
+                    "player1_id": p1,
+                    "player2_id": p2,
+                    "status": "pending",
+                    "score1": 0,
+                    "score2": 0,
+                    "tie_break_round": next_round
+                })
+                
+            if new_matches:
+                self.supabase.table("gt_matches").insert(new_matches).execute()
+                return True, f"🚨 Égalité critique détectée ! Matchs de Barrage #{next_round} générés."
+                
+        except Exception as e:
+            return False, f"Erreur de l'arbitre : {e}"
