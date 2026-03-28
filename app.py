@@ -47,6 +47,71 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def draw_luxury_table(data_list, title=None, columns=None, is_ranking=True):
+    """Génère un tableau HTML au design 'Snook'R Héraldique' avec option podium"""
+    if not data_list: return ""
+    
+    html = ""
+    if title:
+        html += f"<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25; margin-bottom: 15px; margin-top: 20px;\">{title}</h4>"
+        
+    html += "<table style='width: 100%; border-collapse: collapse; margin-bottom: 25px; background: rgba(255,255,255, 0.03); border-radius: 8px; overflow: hidden; border: 1px solid rgba(198, 156, 37, 0.3);'>"
+    
+    # En-tête
+    if not columns:
+        columns = list(data_list[0].keys())
+        
+    html += "<thead style='background-color: rgba(198, 156, 37, 0.1); border-bottom: 2px solid #C69C25;'><tr>"
+    for col in columns:
+        # On aligne les textes longs à gauche, les chiffres au centre
+        align = "left" if col in ["Joueur", "Nom", "Détails du Match"] else "center"
+        html += f"<th style='padding: 12px; text-align: {align}; color: #C69C25; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px;'>{col}</th>"
+    html += "</tr></thead><tbody>"
+    
+    # Lignes
+    for i, row in enumerate(data_list, 1):
+        bg_row = "transparent"
+        rank_color = "inherit"
+        rank_icon = str(row.get("Rang", row.get("Numéro", i)))
+        
+        # GESTION DU PODIUM (Uniquement si is_ranking est True)
+        if is_ranking:
+            # On tente de récupérer la vraie valeur du rang si elle existe
+            try:
+                actual_rank = int(row.get("Rang", i))
+            except:
+                actual_rank = i
+                
+            if actual_rank == 1:
+                bg_row = "rgba(198, 156, 37, 0.08)" # Or subtil
+                rank_color = "#FFD700" 
+                rank_icon = "🥇"
+            elif actual_rank == 2:
+                bg_row = "rgba(224, 255, 255, 0.04)" # Argent très léger
+                rank_color = "#E0FFFF"
+                rank_icon = "🥈"
+            elif actual_rank == 3:
+                bg_row = "rgba(205, 127, 50, 0.04)" # Bronze très léger
+                rank_color = "#CD7F32"
+                rank_icon = "🥉"
+            else:
+                rank_icon = str(actual_rank)
+                
+        html += f"<tr style='background-color: {bg_row}; border-bottom: 1px solid rgba(198, 156, 37, 0.15);'>"
+        for col in columns:
+            val = row.get(col, "")
+            align = "left" if col in ["Joueur", "Nom", "Détails du Match"] else "center"
+            
+            if is_ranking and col in ["Rang", "Numéro"]:
+                html += f"<td style='padding: 12px; text-align: {align}; font-weight: bold; color: {rank_color}; font-size: 1.2em;'>{rank_icon}</td>"
+            elif col in ["Joueur", "Nom"]:
+                html += f"<td style='padding: 12px; text-align: {align}; font-weight: 600;'>{val}</td>"
+            else:
+                html += f"<td style='padding: 12px; text-align: {align}; opacity: 0.9;'>{val}</td>"
+        html += "</tr>"
+        
+    html += "</tbody></table>"
+    return html
 
 def get_badges_html(player, matches_history):
     """
@@ -697,15 +762,17 @@ elif page == "🏆 Classement":
             display_df.reset_index(drop=True, inplace=True)
             display_df.index = display_df.index + 1
 
-            # 5. Affichage
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                column_config={
-                    "Points Elo": st.column_config.NumberColumn(format="%d ⭐️"),
-                    "Matchs": st.column_config.NumberColumn(format="%d 🎮"),
-                },
-            )
+            # 5. Affichage avec le Tableau VIP
+            list_data = []
+            for index, row in display_df.iterrows():
+                list_data.append({
+                    "Rang": index,
+                    "Joueur": row["Joueur"],
+                    "Points Elo": f"{int(row['Points Elo'])} ⭐️",
+                    "Matchs": f"{int(row['Matchs'])} 🎮"
+                })
+            
+            st.markdown(draw_luxury_table(list_data), unsafe_allow_html=True)
 
 elif page == "👤 Profils Joueurs":
     # --- 0. SÉLECTION DU JOUEUR ---
@@ -1452,7 +1519,7 @@ elif page == "🆚 Comparateur de joueurs":
         col_left, col_mid, col_right = st.columns([2, 3, 2])
         with col_left:
             st.markdown(
-                f"<h2 style='text-align: center; color: #4CAF50;'>{vs_stats['p1_wins']}</h2>",
+                f"<h2 style='text-align: center; color: #C69C25;'>{vs_stats['p1_wins']}</h2>",
                 unsafe_allow_html=True,
             )
             st.markdown(
@@ -1500,7 +1567,7 @@ elif page == "🆚 Comparateur de joueurs":
             st.progress(p1_win_rate)
             st.caption(f"Taux de victoire de {p1_name} : {p1_win_rate*100:.0f}%")
 
-            elo_color = "#4CAF50" if cumulative_score_elo >= 0 else "#FF5252"
+            elo_color = "#C69C25" if cumulative_score_elo >= 0 else "#FF5252"
             st.markdown(
                 f"<div style='text-align: center; margin-top: 15px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);'><div style='font-size: 0.8em; opacity: 0.7; text-transform: uppercase;'>Bilan Elo Net ({p1_name})</div><div style='font-size: 1.5em; font-weight: bold; color: {elo_color};'>{cumulative_score_elo:+} pts</div></div>",
                 unsafe_allow_html=True,
@@ -1589,15 +1656,9 @@ elif page == "🆚 Comparateur de joueurs":
         if not duel_matches:
             st.write("Aucun match trouvé.")
         else:
-            st.dataframe(
-                pd.DataFrame(duel_matches[::-1]),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Détails du Match": st.column_config.TextColumn(width="large"),
-                    "Résultat (P1)": st.column_config.TextColumn(width="small"),
-                },
-            )
+            # On inverse la liste pour avoir les plus récents en premier, et on affiche !
+            # On désactive le mode classement (is_ranking=False) pour ne pas avoir de médaille d'or
+            st.markdown(draw_luxury_table(duel_matches[::-1], is_ranking=False), unsafe_allow_html=True)
 
 elif page == "📑 Mes validations":
     st.header("📑 Matchs à confirmer")
@@ -1983,10 +2044,11 @@ elif page == "🏟️ Grand Tournoi":
                                 max_round = max([m.get("tie_break_round", 0) for m in g_matches]) if g_matches else 0
                                 regular_matches = [m for m in g_matches if m.get("tie_break_round", 0) == 0]
                                 
+                                # ==========================================
                                 # 2. CLASSEMENT PHASE RÉGULIÈRE
+                                # ==========================================
                                 reg_standings = {}
                                 for p in g_parts:
-                                    # On ajoute Tie_V et Tie_Diff pour le tri secret !
                                     reg_standings[p["user_id"]] = {"Nom": all_users_spec.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0, "Tie_V": 0, "Tie_Diff": 0}
                                     
                                 for m in regular_matches:
@@ -2002,7 +2064,6 @@ elif page == "🏟️ Grand Tournoi":
                                             else: reg_standings[p2]["D"] += 1
                                             reg_standings[p2]["Diff"] += (s2 - s1)
                                             
-                                # NOUVEAU : On lit les barrages pour affiner le tri
                                 tie_matches_all = [m for m in g_matches if m.get("tie_break_round", 0) > 0]
                                 for m in tie_matches_all:
                                     if m["status"] == "completed":
@@ -2015,18 +2076,15 @@ elif page == "🏟️ Grand Tournoi":
                                             if s2 > s1: reg_standings[p2]["Tie_V"] += 1
                                             reg_standings[p2]["Tie_Diff"] += (s2 - s1)
 
-                                # LE TRI MAGIQUE : V régulier -> Diff régulier -> V barrage -> Diff barrage
                                 sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"], x["Tie_V"], x["Tie_Diff"]), reverse=True)
                                 
-                                # On nettoie l'affichage pour ne montrer que les stats régulières
-                                display_reg = [{"Nom": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for x in sorted_reg]
-                                
-                                import pandas as pd
-                                df_reg = pd.DataFrame(display_reg)
-                                df_reg.index = df_reg.index + 1
-                                st.dataframe(df_reg, use_container_width=True)
+                                # --- NOUVEAU DESIGN VIP ---
+                                display_reg = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_reg)]
+                                st.markdown(draw_luxury_table(display_reg, "📊 Classement Phase Régulière"), unsafe_allow_html=True)
 
-                                # 3. CLASSEMENT DÉPARTAGE (Si barrages en cours)
+                                # ==========================================
+                                # 3. CLASSEMENT DÉPARTAGE (Si barrages)
+                                # ==========================================
                                 if max_round > 0:
                                     tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
                                     tie_players = set()
@@ -2052,31 +2110,42 @@ elif page == "🏟️ Grand Tournoi":
                                                 tie_standings[p2]["Diff"] += (s2 - s1)
                                                 
                                     sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
-                                    st.markdown(f"**🔥 Départage (Round {max_round})**")
-                                    df_tie = pd.DataFrame(sorted_tie)
-                                    df_tie.index = df_tie.index + 1
-                                    st.dataframe(df_tie, use_container_width=True)
+                                    
+                                    # --- NOUVEAU DESIGN VIP ---
+                                    display_tie = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_tie)]
+                                    st.markdown(draw_luxury_table(display_tie, f"🔥 Départage (Round {max_round})"), unsafe_allow_html=True)
 
-                                # 4. AFFICHAGE SÉPARÉ DES MATCHS
+                                # ==========================================
+                                # 4. AFFICHAGE SÉPARÉ DES MATCHS (Panneau Sportif)
+                                # ==========================================
                                 st.write("")
-                                st.markdown("**Matchs :**")
+                                st.markdown("<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25; border-bottom: 1px solid rgba(198,156,37,0.3); padding-bottom: 10px; margin-bottom: 15px;\">🎱 Matchs de la Poule</h4>", unsafe_allow_html=True)
+                                
                                 for r in range(max_round + 1):
                                     r_matches = [m for m in g_matches if m.get("tie_break_round", 0) == r]
                                     if not r_matches: continue
                                     
                                     if max_round > 0:
-                                        if r == 0:
-                                            st.markdown("🎯 *Phase Régulière*")
-                                        else:
-                                            st.markdown(f"🔥 *Barrages #{r}*")
+                                        round_title = "Phase Régulière" if r == 0 else f"Barrages #{r}"
+                                        st.markdown(f"<div style='color: #C69C25; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; margin-bottom: 10px; font-weight: 600;'>{round_title}</div>", unsafe_allow_html=True)
                                             
                                     for m in r_matches:
                                         p1_name = all_users_spec.get(m["player1_id"], "?")
                                         p2_name = all_users_spec.get(m["player2_id"], "?")
+                                        
+                                        match_html = "<div style='display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(0,0,0,0.2); border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #C69C25;'>"
+                                        
                                         if m["status"] == "completed":
-                                            st.markdown(f"**{p1_name}** <span style='color:#4CAF50;'>{m['score1']} - {m['score2']}</span> **{p2_name}** ✅", unsafe_allow_html=True)
+                                            match_html += f"<div style='flex: 1; text-align: right; font-weight: 600;'>{p1_name}</div>"
+                                            match_html += f"<div style='flex: 0 0 80px; text-align: center; color: #C69C25; font-family: \"Playfair Display\", serif; font-size: 1.3em; font-weight: bold;'>{m['score1']} - {m['score2']}</div>"
+                                            match_html += f"<div style='flex: 1; text-align: left; font-weight: 600;'>{p2_name}</div>"
                                         else:
-                                            st.markdown(f"**{p1_name}** <span style='color:#888;'>vs</span> **{p2_name}** ⏳", unsafe_allow_html=True)
+                                            match_html += f"<div style='flex: 1; text-align: right; font-weight: 600; opacity: 0.7;'>{p1_name}</div>"
+                                            match_html += f"<div style='flex: 0 0 80px; text-align: center; color: #555; font-size: 0.9em; font-style: italic;'>vs ⏳</div>"
+                                            match_html += f"<div style='flex: 1; text-align: left; font-weight: 600; opacity: 0.7;'>{p2_name}</div>"
+                                            
+                                        match_html += "</div>"
+                                        st.markdown(match_html, unsafe_allow_html=True)
 
             # --- CAS 3 : ARBRE UNIQUEMENT ---
             if selected_t_spec["status"] in ["bracket", "completed"]:
@@ -2103,12 +2172,12 @@ elif page == "🏟️ Grand Tournoi":
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
                             
-                            # On force le fond sombre pour tout le monde
-                            bg_color = "#1E1E28"
-                            border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
+                            # --- DESIGN SNOOK'R VIP ---
+                            bg_color = "rgba(15, 23, 42, 0.9)" # Bleu nuit profond
+                            border_color = "#C69C25" if is_gf else ("#CD7F32" if is_pf else "rgba(198, 156, 37, 0.4)")
                             
-                            c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
-                            c_html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
+                            c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
+                            c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
                             
                             if m:
                                 p1 = all_users_spec.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
@@ -2116,30 +2185,25 @@ elif page == "🏟️ Grand Tournoi":
                                 s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                 
                                 if m["status"] == "completed":
-                                    # Définition des couleurs précieuses froids et métalliques
-                                    podium_1_c = "#FFD700" # Gold
-                                    podium_2_c = "#E0FFFF" # Cool Luminous Cyan for 2nd
+                                    podium_1_c = "#C69C25" # Or Snook'R
+                                    podium_2_c = "#E0FFFF" # Argent
                                     podium_3_c = "#CD7F32" # Bronze
                                     
                                     if is_gf:
-                                        # Grande Finale: Gold (Vainqueur) et Cool Cyan (Argenté), les deux en GRAS
                                         w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
                                         w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
-                                        # Le score du podium prend aussi la couleur de la médaille
                                         c1_score = podium_1_c if s1 > s2 else podium_2_c
                                         c2_score = podium_1_c if s2 > s1 else podium_2_c
                                     elif is_pf:
-                                        # Petite Finale: Bronze (Vainqueur en gras) et Gris (Perdant normal)
                                         w1 = f"bold; color: {podium_3_c};" if s1 > s2 else "normal; color: #888;"
                                         w2 = f"bold; color: {podium_3_c};" if s2 > s1 else "normal; color: #888;"
                                         c1_score = podium_3_c if s1 > s2 else "#888"
                                         c2_score = podium_3_c if s2 > s1 else "#888"
                                     else:
-                                        # Match normal: Blanc (Vainqueur en gras) et Gris (Perdant normal)
                                         w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                         w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                        c1_score = "#4CAF50" if s1 > s2 else "#888" # Le score du gagnant en vert
-                                        c2_score = "#4CAF50" if s2 > s1 else "#888"
+                                        c1_score = "#C69C25" if s1 > s2 else "#888" # Score gagnant en Or
+                                        c2_score = "#C69C25" if s2 > s1 else "#888"
                                 else:
                                     w1 = w2 = "normal; color: white;"
                                     c1_score = c2_score = "transparent"
@@ -2462,19 +2526,16 @@ elif page == "🏟️ Grand Tournoi":
                             
                             sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
                             
-                            st.markdown("**📊 Classement Initial (Phase Régulière) :**")
-                            import pandas as pd
-                            df_reg = pd.DataFrame(sorted_reg)
-                            df_reg.index = df_reg.index + 1
-                            st.dataframe(df_reg, use_container_width=True)
+                            # --- NOUVEAU DESIGN VIP ---
+                            display_reg = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_reg)]
+                            st.markdown(draw_luxury_table(display_reg, "📊 Classement Phase Régulière"), unsafe_allow_html=True)
 
                             # ==========================================
-                            # 3. CLASSEMENT DU DÉPARTAGE EN COURS (Optionnel)
+                            # 3. CLASSEMENT DU DÉPARTAGE EN COURS
                             # ==========================================
                             if max_round > 0:
                                 tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
                                 
-                                # On isole uniquement les joueurs concernés par ce barrage
                                 tie_players = set()
                                 for m in tie_matches:
                                     if m["player1_id"]: tie_players.add(m["player1_id"])
@@ -2499,13 +2560,12 @@ elif page == "🏟️ Grand Tournoi":
                                             
                                 sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
                                 
-                                st.markdown(f"**🔥 Classement du Départage (Round {max_round}) :**")
-                                df_tie = pd.DataFrame(sorted_tie)
-                                df_tie.index = df_tie.index + 1
-                                st.dataframe(df_tie, use_container_width=True)
+                                # --- NOUVEAU DESIGN VIP ---
+                                display_tie = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_tie)]
+                                st.markdown(draw_luxury_table(display_tie, f"🔥 Classement du Départage (Round {max_round})"), unsafe_allow_html=True)
 
                             st.divider()
-                            st.markdown("**Saisie des Matchs :**")
+                            st.markdown("<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25;\">✏️ Saisie des Matchs</h4>", unsafe_allow_html=True)
                             
                             # 3. Affichage visuel séparé par Round (Régulier vs Barrages)
                             for r in range(max_round + 1):
@@ -2617,8 +2677,8 @@ elif page == "🏟️ Grand Tournoi":
                                 expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(1, expected_count + 1):
-                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
-                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    bg_color = "rgba(198, 156, 37, 0.2)" if r_num == 1 else "rgba(15, 23, 42, 0.5)"
+                                    border_color = "#C69C25" if r_num == 1 else "#444"
                                     text_color = "white" if r_num == 1 else "#888"
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 14px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
@@ -2636,8 +2696,8 @@ elif page == "🏟️ Grand Tournoi":
                                 
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(1, half_count + 1):
-                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
-                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    bg_color = "rgba(198, 156, 37, 0.2)" if r_num == 1 else "rgba(15, 23, 42, 0.5)"
+                                    border_color = "#C69C25" if r_num == 1 else "#444"
                                     text_color = "white" if r_num == 1 else "#888"
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
@@ -2661,8 +2721,8 @@ elif page == "🏟️ Grand Tournoi":
                                 
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(half_count + 1, expected_count + 1):
-                                    bg_color = "#2E7D32" if r_num == 1 else "#1E1E28"
-                                    border_color = "#4CAF50" if r_num == 1 else "#444"
+                                    bg_color = "rgba(198, 156, 37, 0.2)" if r_num == 1 else "rgba(15, 23, 42, 0.5)"
+                                    border_color = "#C69C25" if r_num == 1 else "#444"
                                     text_color = "white" if r_num == 1 else "#888"
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
@@ -2751,11 +2811,12 @@ elif page == "🏟️ Grand Tournoi":
                                     b_id = f"{prefix}_R{r_num}_M{m_num}"
                                     m = tier_dict.get(b_id)
                                     
-                                    bg_color = "#1E1E28"
-                                    border_color = "#FFD700" if is_gf else ("#CD7F32" if is_pf else "#444")
+                                    # --- DESIGN SNOOK'R VIP ---
+                                    bg_color = "rgba(15, 23, 42, 0.9)"
+                                    border_color = "#C69C25" if is_gf else ("#CD7F32" if is_pf else "rgba(198, 156, 37, 0.4)")
                                     
-                                    c_html = f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); margin: 5px 0;'>"
-                                    c_html += f"<div style='font-size: 10px; color: #888; text-align: center; margin-bottom: 8px;'>Match {m_num}</div>"
+                                    c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
+                                    c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
                                     
                                     if m:
                                         p1 = all_users.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
@@ -2763,29 +2824,25 @@ elif page == "🏟️ Grand Tournoi":
                                         s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                         
                                         if m["status"] == "completed":
-                                            # Palette de couleurs froides et métalliques
-                                            podium_1_c = "#FFD700" # Gold
-                                            podium_2_c = "#E0FFFF" # Cool Luminous Cyan for 2nd
-                                            podium_3_c = "#CD7F32" # Bronze
+                                            podium_1_c = "#C69C25"
+                                            podium_2_c = "#E0FFFF"
+                                            podium_3_c = "#CD7F32"
                                             
                                             if is_gf:
-                                                # Grande Finale: Gold et Cool Cyan, tous les deux en GRAS
                                                 w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
                                                 w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
                                                 c1_score = podium_1_c if s1 > s2 else podium_2_c
                                                 c2_score = podium_1_c if s2 > s1 else podium_2_c
                                             elif is_pf:
-                                                # Petite Finale: Bronze (Vainqueur gras) et normal (perdant)
                                                 w1 = f"bold; color: {podium_3_c};" if s1 > s2 else "normal; color: #888;"
                                                 w2 = f"bold; color: {podium_3_c};" if s2 > s1 else "normal; color: #888;"
                                                 c1_score = podium_3_c if s1 > s2 else "transparent"
                                                 c2_score = podium_3_c if s2 > s1 else "transparent"
                                             else:
-                                                # Match normal: Blanc (Vainqueur gras) et normal (perdant)
                                                 w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                                 w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                                c1_score = "#4CAF50" if s1 > s2 else "transparent"
-                                                c2_score = "#4CAF50" if s2 > s1 else "transparent"
+                                                c1_score = "#C69C25" if s1 > s2 else "transparent"
+                                                c2_score = "#C69C25" if s2 > s1 else "transparent"
                                         else:
                                             w1 = w2 = "normal; color: white;"
                                             c1_score = c2_score = "transparent"
@@ -3092,22 +3149,22 @@ elif page == "🍻 Weekly Fun":
         if not description_text:
             description_text = "Aucune règle spéciale pour ce tournoi."
 
-        # Affiche la bannière du tournoi avec le design premium
+        # Affiche la bannière du tournoi avec le design Premium Snook'R
         st.markdown(
             f"""
-<div style='background-color: #2b2b36; padding: 25px; border-radius: 12px; border-left: 6px solid #FF4B4B; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 25px;'>
-    <h2 style='margin-top: 0; margin-bottom: 15px; color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
+<div style='background: linear-gradient(145deg, #0f172a, #1e293b); padding: 25px; border-radius: 12px; border: 1px solid #C69C25; border-left: 8px solid #C69C25; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 25px;'>
+    <h2 style='margin-top: 0; margin-bottom: 15px; color: #C69C25; font-family: "Playfair Display", serif; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
         🏆 {current_weekly['name']}
     </h2>
     <div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>
-        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
             📅 Date : <span style='color: #ffffff; font-weight: bold;'>{formatted_date}</span>
         </div>
-        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
             🎟️ Places : <span style='color: #ffffff; font-weight: bold;'>{current_weekly['max_players']} max</span>
         </div>
     </div>
-    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;'>
+    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px dashed rgba(198,156,37,0.3); padding-top: 15px;'>
         <i>{description_text}</i>
     </div>
 </div>
@@ -3282,36 +3339,18 @@ elif page == "🍻 Weekly Fun":
             
             st.markdown("### 🏆 Classement Final")
             
-            # --- GÉNÉRATION DU TABLEAU HTML CUSTOM ---
-            html_table = "<table class='snookr-table'>"
-            html_table += "<thead><tr><th>Rang</th><th>Joueur</th></tr></thead>"
-            html_table += "<tbody>"
-            
+            # Préparation des données pour notre belle fonction
+            archive_data = []
             for index, p in enumerate(p_participants_sorted, start=1):
                 p_name = p.get('profiles', {}).get('username', 'Inconnu')
                 display_rank = p.get('final_rank', index)
-                
-                # Définition du badge de médaille
-                badge_html = ""
-                if display_rank == 1:
-                    badge_html = "<span class='badge badge-gold'>🥇</span>"
-                elif display_rank == 2:
-                    badge_html = "<span class='badge badge-silver'>🥈</span>"
-                elif display_rank == 3:
-                    badge_html = "<span class='badge badge-bronze'>🥉</span>"
-                else:
-                    badge_html = f"<span class='badge badge-plain'>{display_rank}</span>"
-                
-                # Ajout de la ligne au tableau
-                html_table += f"<tr>"
-                html_table += f"<td class='rank-cell'>{badge_html}</td>"
-                html_table += f"<td style='color: white; font-weight: 600;'>{p_name}</td>"
-                html_table += f"</tr>"
-                
-            html_table += "</tbody></table>"
+                archive_data.append({
+                    "Rang": display_rank,
+                    "Joueur": p_name
+                })
             
-            # Injection du tableau HTML dans Streamlit
-            st.markdown(html_table, unsafe_allow_html=True)
+            # Affichage majestueux
+            st.markdown(draw_luxury_table(archive_data), unsafe_allow_html=True)
             st.write("") # Petit espace pour respirer
 
 elif page == "🧠 Entraînements":
@@ -3367,22 +3406,22 @@ elif page == "🧠 Entraînements":
         if not description_text:
             description_text = "Cours libre, programme défini sur place."
 
-        # Bannière bleue (Thème apprentissage)
+        # Bannière bleue nuit / Or
         st.markdown(
             f"""
-<div style='background-color: #2b2b36; padding: 25px; border-radius: 12px; border-left: 6px solid #3498db; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 25px;'>
-    <h2 style='margin-top: 0; margin-bottom: 15px; color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
+<div style='background: linear-gradient(145deg, #0f172a, #1e293b); padding: 25px; border-radius: 12px; border: 1px solid #C69C25; border-left: 8px solid #C69C25; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 25px;'>
+    <h2 style='margin-top: 0; margin-bottom: 15px; color: #C69C25; font-family: "Playfair Display", serif; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
         🧠 {current_training['name']}
     </h2>
     <div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>
-        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
             📅 Date : <span style='color: #ffffff; font-weight: bold;'>{formatted_date}</span>
         </div>
-        <div style='background-color: rgba(255,255,255,0.08); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px;'>
+        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
             🎟️ Places : <span style='color: #ffffff; font-weight: bold;'>{current_training['max_players']} max</span>
         </div>
     </div>
-    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;'>
+    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px dashed rgba(198,156,37,0.3); padding-top: 15px;'>
         <i>{description_text}</i>
     </div>
 </div>
