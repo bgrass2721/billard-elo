@@ -13,128 +13,37 @@ SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
 # ==========================================
 # 🎨 CHIRURGIE ESTHÉTIQUE DE L'APPLICATION
 # ==========================================
+import streamlit as st
+import pandas as pd
 
 # 1. Configuration de la page (Doit être en tout premier)
+# (Pense à supprimer tes anciens appels st.set_page_config s'ils existent déjà).
 st.set_page_config(page_title="Snook'R Club", page_icon="🎱", layout="wide")
 
-# 2. Injection de Custom CSS (La magie opère ici)
 st.markdown("""
 <style>
-    /* 1. Chargement d'une police moderne */
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
-
-    html, body, [class*="css"]  {
-        font-family: 'Poppins', sans-serif;
-        color: #E0E0E0;
+    /* Importation des polices Google : Montserrat (texte) et Playfair Display (titres) */
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&family=Playfair+Display:wght@700&display=swap');
+    
+    /* On force la police de texte propre partout */
+    html, body, [class*="css"] {
+        font-family: 'Montserrat', sans-serif !important;
     }
-
-    /* 2. Changement de la couleur de fond générale */
-    .stApp {
-        background-color: #101216;
-    }
-
-    /* 3. Style des Titres (H1, H2, H3) */
+    
+    /* On donne la police "Héraldique/Classe" à tous les grands titres de l'app */
     h1, h2, h3 {
-        color: white !important;
-        font-weight: 700 !important;
-        margin-bottom: 20px !important;
-    }
-    
-    /* Titre d'accent avec néon vert */
-    .snookr-title {
-        color: #00E676;
-        text-shadow: 0 0 10px rgba(0,230,118,0.5);
+        font-family: 'Playfair Display', serif !important;
     }
 
-    /* 4. Style des conteneurs (Expanders, Cartes) */
-    .stExpander {
-        background-color: #1E2228 !important;
-        border: 1px solid #333 !important;
-        border-radius: 12px !important;
-        overflow: hidden;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        margin-bottom: 15px;
-    }
-    
-    /* En-tête de l'expander */
-    .stExpander summary {
-        background-color: #252A32 !important;
-        padding: 10px 15px !important;
-        font-weight: 600;
-        color: white;
-    }
-
-    /* 5. Style du Menu Déroulant (Selectbox) */
-    .stSelectbox div[data-baseweb="select"] {
-        background-color: #1E2228 !important;
-        border: 1px solid #444 !important;
-        border-radius: 8px !important;
-    }
-    .stSelectbox div[data-baseweb="select"] * {
-        color: white !important;
-    }
-
-    /* 6. STYLE DES TABLEAUX DE CLASSEMENT (HTML CUSTOM) */
-    .snookr-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 15px 0;
-        border-radius: 8px;
-        overflow: hidden;
-        background-color: #1E2228;
-    }
-    
-    .snookr-table thead tr {
-        background-color: #252A32;
-        color: #888;
-        text-align: left;
-        font-weight: 600;
-        font-size: 0.9em;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    .snookr-table th, .snookr-table td {
-        padding: 15px;
-        border-bottom: 1px solid #333;
-    }
-    
-    .snookr-table tbody tr {
-        transition: background-color 0.2s;
-    }
-    
-    .snookr-table tbody tr:last-of-type {
-        border-bottom: 2px solid #00E676;
-    }
-    
-    .snookr-table tbody tr:hover {
-        background-color: rgba(0,230,118, 0.05);
-    }
-    
-    /* Style spécial pour le numéro de rang */
-    .rank-cell {
-        font-weight: 700;
-        color: white;
-        width: 60px;
+    /* Le style spécifique pour le gros logo en haut à gauche */
+    .sidebar-logo-text {
+        font-family: 'Playfair Display', serif;
+        color: #C69C25; /* Couleur Or */
+        font-size: 2.8em;
         text-align: center;
+        margin-top: 0px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
-    
-    /* Badges pour podium */
-    .badge {
-        display: inline-block;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        text-align: center;
-        line-height: 28px;
-        font-size: 1.1em;
-        margin-right: 5px;
-    }
-    .badge-gold { background: linear-gradient(135deg, #FFD700, #F1C40F); color: #212121; }
-    .badge-silver { background: linear-gradient(135deg, #E0FFFF, #B0BEC5); color: #212121; }
-    .badge-bronze { background: linear-gradient(135deg, #CD7F32, #A1887F); color: white; }
-    .badge-plain { color: #888; font-weight: normal; }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -669,11 +578,8 @@ except StopIteration:
     rank_2v2 = "-"
 
 # --- BARRE LATÉRALE ---
-st.sidebar.markdown("""
-    <div style='text-align: center; padding: 10px 0;'>
-        <h1 style='font-size: 2.5em; margin: 0;'>🎱 <span class='snookr-title'>Snook'R</span></h1>
-    </div>
-""", unsafe_allow_html=True)
+st.sidebar.markdown("<div class='sidebar-logo-text'>🎱 Snook'R</div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='text-align: center; color: #888; margin-top: -15px; margin-bottom: 20px; font-style: italic;'>Blackball Club</div>", unsafe_allow_html=True)
 st.sidebar.write(f"Joueur : **{user['username']}**")
 
 st.sidebar.divider()
@@ -848,23 +754,33 @@ elif page == "👤 Profils Joueurs":
     st.subheader("🏆 Le Panthéon")
     gt_stats = db.get_user_gt_stats(target_user["id"])
     
+    # --- STYLE DES CARTES (Épuré, Doré et Robuste) ---
+    card_style = "border: 1px solid #C69C25; border-radius: 10px; padding: 15px; text-align: center; background: rgba(198, 156, 37, 0.05); min-width: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"
+    label_style = "font-size: 0.85em; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.8;"
+    number_style = "font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: #C69C25; margin-top: 5px;"
+
     if not gt_stats:
         st.caption("Aucune participation en Grand Tournoi pour le moment.")
     else:
-        # On filtre pour les compteurs du podium
         podium_finishes = [s for s in gt_stats if s.get('final_rank') in [1, 2, 3]]
         gt_gold = sum(1 for s in podium_finishes if s['final_rank'] == 1)
         gt_silver = sum(1 for s in podium_finishes if s['final_rank'] == 2)
         gt_bronze = sum(1 for s in podium_finishes if s['final_rank'] == 3)
         
-        c1, c2, c3 = st.columns(3)
-        if gt_gold > 0: c1.markdown(f"### 🥇 Or : {gt_gold}")
-        if gt_silver > 0: c2.markdown(f"### 🥈 Argent : {gt_silver}")
-        if gt_bronze > 0: c3.markdown(f"### 🥉 Bronze : {gt_bronze}")
+        cards_html = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
+        if gt_gold > 0:
+            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥇</div><div style='{label_style}'>Or</div><div style='{number_style}'>{gt_gold}</div></div>"
+        if gt_silver > 0:
+            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥈</div><div style='{label_style}'>Argent</div><div style='{number_style}'>{gt_silver}</div></div>"
+        if gt_bronze > 0:
+            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥉</div><div style='{label_style}'>Bronze</div><div style='{number_style}'>{gt_bronze}</div></div>"
+        cards_html += "</div>"
+        
+        st.markdown(cards_html, unsafe_allow_html=True)
 
-        # Le détail du palmarès (Historique complet)
+        # Le détail du palmarès
         with st.expander("📜 Palmarès détaillé (Grands Tournois)"):
-            # On trie par rang (les meilleures perfs en premier)
+            html_list = "<div style='padding-top: 5px;'>"
             for s in sorted(gt_stats, key=lambda x: x.get('final_rank', 999)):
                 rank = s.get('final_rank')
                 t_name = s.get('grand_tournaments', {}).get('name', 'Tournoi Inconnu')
@@ -872,12 +788,13 @@ elif page == "👤 Profils Joueurs":
                 if rank == 1: emoji = "🥇"
                 elif rank == 2: emoji = "🥈"
                 elif rank == 3: emoji = "🥉"
-                else: emoji = "🎖️" # Médaille d'honneur pour le reste du tableau
+                else: emoji = "🎖️"
                 
-                if rank in [1, 2, 3]:
-                    st.write(f"{emoji} **{rank}{'er' if rank==1 else 'ème'}** au *{t_name}*")
-                else:
-                    st.write(f"{emoji} **Top {rank}** au *{t_name}*")
+                rank_text = f"{rank}{'er' if rank==1 else 'ème'}" if rank in [1, 2, 3] else f"Top {rank}"
+                
+                html_list += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(198, 156, 37, 0.2); display: flex; align-items: center;'><span style='font-size: 1.4em; margin-right: 15px;'>{emoji}</span><span><b>{rank_text}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i></span></div>"
+            html_list += "</div>"
+            st.markdown(html_list, unsafe_allow_html=True)
 
     # ==========================================
     # 🏅 VITRINE 2 : SUCCÈS DE CARRIÈRE (Anciens badges)
@@ -918,31 +835,34 @@ elif page == "👤 Profils Joueurs":
         w_bronze = sum(1 for s in weekly_stats if s['final_rank'] == 3)
         w_choco = sum(1 for s in weekly_stats if s['final_rank'] > 3)
         
-        bc1, bc2, bc3, bc4 = st.columns(4)
-        with bc1:
-            if w_gold > 0: st.markdown(f"🥇 **Or**\n## {w_gold}")
-            else: st.caption("🥇 Or\n--")
-        with bc2:
-            if w_silver > 0: st.markdown(f"🥈 **Argent**\n## {w_silver}")
-            else: st.caption("🥈 Argent\n--")
-        with bc3:
-            if w_bronze > 0: st.markdown(f"🥉 **Bronze**\n## {w_bronze}")
-            else: st.caption("🥉 Bronze\n--")
-        with bc4:
-            if w_choco > 0: st.markdown(f"🍫 **Chocolat**\n## {w_choco}")
-            else: st.caption("🍫 Chocolat\n--")
+        cards_html_w = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
+        if w_gold > 0:
+            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥇</div><div style='{label_style}'>Or</div><div style='{number_style}'>{w_gold}</div></div>"
+        if w_silver > 0:
+            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥈</div><div style='{label_style}'>Argent</div><div style='{number_style}'>{w_silver}</div></div>"
+        if w_bronze > 0:
+            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥉</div><div style='{label_style}'>Bronze</div><div style='{number_style}'>{w_bronze}</div></div>"
+        if w_choco > 0:
+            # Pour le chocolat, on change juste la couleur du texte du chiffre pour qu'il soit marron cuivré
+            choco_number = "font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: #A0522D; margin-top: 5px;"
+            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🍫</div><div style='{label_style}'>Chocolat</div><div style='{choco_number}'>{w_choco}</div></div>"
+        cards_html_w += "</div>"
+        
+        st.markdown(cards_html_w, unsafe_allow_html=True)
 
         with st.expander("📜 Palmarès détaillé (Weekly Fun)"):
+            html_list_w = "<div style='padding-top: 5px;'>"
             for s in sorted(weekly_stats, key=lambda x: x['weekly_tournaments']['event_date'] if x.get('weekly_tournaments') else '', reverse=True):
                 rank = s['final_rank']
                 emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🍫"
                 t_name = s.get('weekly_tournaments', {}).get('name', 'Tournoi Inconnu')
                 
-                # Gestion sécurisée de la date
                 t_date_raw = s.get('weekly_tournaments', {}).get('event_date')
                 t_date = pd.to_datetime(t_date_raw).strftime('%d/%m/%y') if t_date_raw else "Date inconnue"
                 
-                st.write(f"{emoji} **{rank}er/ème** au *{t_name}* ({t_date})")
+                html_list_w += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(198, 156, 37, 0.2); display: flex; align-items: center;'><span style='font-size: 1.4em; margin-right: 15px;'>{emoji}</span><span><b>{rank}{'er' if rank==1 else 'ème'}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i> <span style='opacity: 0.4; font-size: 0.85em; margin-left: 6px;'>({t_date})</span></span></div>"
+            html_list_w += "</div>"
+            st.markdown(html_list_w, unsafe_allow_html=True)
 
     st.divider()
 
