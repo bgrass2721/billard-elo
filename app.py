@@ -503,7 +503,17 @@ if st.session_state.user_data is None and not st.session_state.logout_clicked:
         pass
 # --- ÉCRAN DE CONNEXION / INSCRIPTION ---
 if st.session_state.user_data is None:
-    st.title("🎱 BlackBall Compétition")
+    # Le nouveau titre "Luxe" pour la page de connexion
+    st.markdown("""
+    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 30px; margin-top: 10px;">
+        <div style="font-size: 3.5em; text-shadow: 2px 2px 5px rgba(0,0,0,0.5);">🎱</div>
+        <div style="line-height: 1.1;">
+            <div style="font-family: 'Playfair Display', serif; font-size: 3.5em; font-weight: 700; color: #C69C25; text-shadow: 2px 2px 4px rgba(0,0,0,0.4);">Snook'R</div>
+            <div style="font-family: 'Playfair Display', serif; font-size: 1.8em; font-style: italic; color: #8BA1B5;">BlackBall Club</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
     tab1, tab2 = st.tabs(["Connexion", "Créer un compte"])
 
     with tab1:
@@ -643,8 +653,17 @@ except StopIteration:
     rank_2v2 = "-"
 
 # --- BARRE LATÉRALE ---
-st.sidebar.markdown("<div class='sidebar-logo-text'>🎱 Snook'R</div>", unsafe_allow_html=True)
-st.sidebar.markdown("<div style='text-align: center; color: #888; margin-top: -15px; margin-bottom: 20px; font-style: italic;'>Blackball Club</div>", unsafe_allow_html=True)
+# 1. Affichage du Logo Panda (Assure-toi que l'image s'appelle 'logo.jpg' et est dans le même dossier)
+try:
+    # On ajoute un peu d'espace avant et après le logo pour que ça respire
+    st.sidebar.write("") 
+    st.sidebar.image("panda_logo.png", use_container_width=True)
+    st.sidebar.write("")
+except Exception:
+    # Sécurité : Si l'image n'est pas trouvée, on remet l'ancien texte au lieu de faire planter l'appli
+    st.sidebar.markdown("<div class='sidebar-logo-text'>🎱 Snook'R</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div style='text-align: center; color: #888; margin-top: -15px; margin-bottom: 20px; font-style: italic;'>Blackball Club</div>", unsafe_allow_html=True)
+
 st.sidebar.write(f"Joueur : **{user['username']}**")
 
 st.sidebar.divider()
