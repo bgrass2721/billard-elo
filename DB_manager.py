@@ -86,101 +86,62 @@ class DBManager:
         return self.supabase.table("matches").insert(data).execute()
 
     def revoke_match(self, match_id):
-        """Annule un match validé et rétablit les anciens scores Elo (Compatible 1v1 et 2v2)"""
+        """Annule un match validé et rétablit les anciens scores Elo (Compatible Asymétrique)"""
         try:
-            # 1. Récupérer le match
-            match = (
-                self.supabase.table("matches")
-                .select("*")
-                .eq("id", match_id)
-                .single()
-                .execute()
-                .data
-            )
+            match = self.supabase.table("matches").select("*").eq("id", match_id).single().execute().data
             if not match or match["status"] != "validated":
-                return (
-                    False,
-                    "Le match n'est pas dans un état permettant la révocation.",
-                )
+                return False, "Le match n'est pas dans un état permettant la révocation."
 
             mode = match.get("mode", "1v1")
-            delta = match["elo_gain"]
+            
+            # Récupération asymétrique (Si elo_loss n'existe pas sur les vieux matchs, on utilise elo_gain par défaut)
+            gain = match.get("elo_gain", 0)
+            loss = match.get("elo_loss", gain)
 
             # --- CAS 1v1 ---
             if mode == "1v1":
-                # On récupère les profils
-                w_res = (
-                    self.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", match["winner_id"])
-                    .single()
-                    .execute()
-                )
-                l_res = (
-                    self.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", match["loser_id"])
-                    .single()
-                    .execute()
-                )
+                w_res = self.supabase.table("profiles").select("*").eq("id", match["winner_id"]).single().execute()
+                l_res = self.supabase.table("profiles").select("*").eq("id", match["loser_id"]).single().execute()
 
-                # On inverse les scores (On retire au gagnant, on rend au perdant)
-                self.supabase.table("profiles").update(
-                    {
-                        "elo_rating": w_res.data["elo_rating"] - delta,
-                        "matches_played": max(0, w_res.data["matches_played"] - 1),
-                    }
-                ).eq("id", match["winner_id"]).execute()
+                # On retire le gain au vainqueur
+                self.supabase.table("profiles").update({
+                    "elo_rating": w_res.data["elo_rating"] - gain,
+                    "matches_played": max(0, w_res.data["matches_played"] - 1),
+                }).eq("id", match["winner_id"]).execute()
 
-                self.supabase.table("profiles").update(
-                    {
-                        "elo_rating": l_res.data["elo_rating"] + delta,
-                        "matches_played": max(0, l_res.data["matches_played"] - 1),
-                    }
-                ).eq("id", match["loser_id"]).execute()
+                # On rend la perte au vaincu
+                self.supabase.table("profiles").update({
+                    "elo_rating": l_res.data["elo_rating"] + loss,
+                    "matches_played": max(0, l_res.data["matches_played"] - 1),
+                }).eq("id", match["loser_id"]).execute()
 
             # --- CAS 2v2 ---
             elif mode == "2v2":
-                # On identifie les 4 joueurs
                 winners = [match["winner_id"], match["winner2_id"]]
                 losers = [match["loser_id"], match["loser2_id"]]
-
-                # On récupère les données actuelles
-                all_ids = winners + losers
-                profiles_res = (
-                    self.supabase.table("profiles")
-                    .select("*")
-                    .in_("id", all_ids)
-                    .execute()
-                )
+                
+                profiles_res = self.supabase.table("profiles").select("*").in_("id", winners + losers).execute()
                 p_map = {p["id"]: p for p in profiles_res.data}
 
-                # On retire les points aux gagnants
                 for wid in winners:
-                    curr = p_map[wid]
-                    self.supabase.table("profiles").update(
-                        {
-                            "elo_2v2": curr.get("elo_2v2", 1000) - delta,
+                    if wid in p_map:
+                        curr = p_map[wid]
+                        self.supabase.table("profiles").update({
+                            "elo_2v2": curr.get("elo_2v2", 1000) - gain,
                             "matches_2v2": max(0, curr.get("matches_2v2", 0) - 1),
-                        }
-                    ).eq("id", wid).execute()
+                        }).eq("id", wid).execute()
 
-                # On rend les points aux perdants
                 for lid in losers:
-                    curr = p_map[lid]
-                    self.supabase.table("profiles").update(
-                        {
-                            "elo_2v2": curr.get("elo_2v2", 1000) + delta,
+                    if lid in p_map:
+                        curr = p_map[lid]
+                        self.supabase.table("profiles").update({
+                            "elo_2v2": curr.get("elo_2v2", 1000) + loss,
                             "matches_2v2": max(0, curr.get("matches_2v2", 0) - 1),
-                        }
-                    ).eq("id", lid).execute()
+                        }).eq("id", lid).execute()
 
-            # 4. Marquer le match comme révoqué
-            self.supabase.table("matches").update({"status": "revoked"}).eq(
-                "id", match_id
-            ).execute()
-
+            self.supabase.table("matches").update({"status": "revoked"}).eq("id", match_id).execute()
             return True, "Match révoqué et scores rétablis."
+            
         except Exception as e:
             return False, f"Erreur lors de la révocation : {str(e)}"
 
@@ -241,96 +202,49 @@ class DBManager:
 
     def validate_match_logic(self, match_id):
         try:
-            # Import du moteur (si ce n'est pas fait en haut du fichier)
             from elo_engine import EloEngine
-
             engine = EloEngine()
 
-            # 1. Récupération sécurisée du match
-            match_res = (
-                self.supabase.table("matches")
-                .select("*")
-                .eq("id", match_id)
-                .single()
-                .execute()
-            )
+            match_res = self.supabase.table("matches").select("*").eq("id", match_id).single().execute()
             match = match_res.data
 
-            # Petite sécurité : si déjà validé, on ne refait pas le calcul
             if match["status"] == "validated":
                 return True, "Ce match est déjà validé."
 
-            # On récupère le mode (par défaut '1v1' si l'info manque)
             mode = match.get("mode", "1v1")
-            delta = 0  # Variable pour stocker les points échangés
+            gain = 0  
+            loss = 0  
 
             # =========================================================
-            # SCÉNARIO 1 : MODE 1 vs 1 (CLASSIQUE)
+            # SCÉNARIO 1 : MODE 1 vs 1
             # =========================================================
             if mode == "1v1":
-                # Récupération des profils
-                winner = (
-                    self.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", match["winner_id"])
-                    .single()
-                    .execute()
-                    .data
-                )
-                loser = (
-                    self.supabase.table("profiles")
-                    .select("*")
-                    .eq("id", match["loser_id"])
-                    .single()
-                    .execute()
-                    .data
+                winner = self.supabase.table("profiles").select("*").eq("id", match["winner_id"]).single().execute().data
+                loser = self.supabase.table("profiles").select("*").eq("id", match["loser_id"]).single().execute().data
+
+                # On récupère les 4 valeurs du nouveau moteur
+                new_w_elo, new_l_elo, gain, loss = engine.compute_new_ratings(
+                    winner["elo_rating"], loser["elo_rating"], winner["matches_played"], loser["matches_played"]
                 )
 
-                # Calcul Elo 1v1
-                new_w_elo, new_l_elo, delta = engine.compute_new_ratings(
-                    winner["elo_rating"],
-                    loser["elo_rating"],
-                    winner["matches_played"],
-                    loser["matches_played"],
-                )
+                self.supabase.table("profiles").update({
+                    "elo_rating": new_w_elo,
+                    "matches_played": winner["matches_played"] + 1,
+                }).eq("id", winner["id"]).execute()
 
-                # Mise à jour GAGNANT (Colonne 1v1)
-                self.supabase.table("profiles").update(
-                    {
-                        "elo_rating": new_w_elo,
-                        "matches_played": winner["matches_played"] + 1,
-                    }
-                ).eq("id", winner["id"]).execute()
-
-                # Mise à jour PERDANT (Colonne 1v1)
-                self.supabase.table("profiles").update(
-                    {
-                        "elo_rating": new_l_elo,
-                        "matches_played": loser["matches_played"] + 1,
-                    }
-                ).eq("id", loser["id"]).execute()
+                self.supabase.table("profiles").update({
+                    "elo_rating": new_l_elo,
+                    "matches_played": loser["matches_played"] + 1,
+                }).eq("id", loser["id"]).execute()
 
             # =========================================================
-            # SCÉNARIO 2 : MODE 2 vs 2 (NOUVEAU)
+            # SCÉNARIO 2 : MODE 2 vs 2
             # =========================================================
             elif mode == "2v2":
-                # On liste les 4 IDs concernés
-                ids = [
-                    match["winner_id"],
-                    match["winner2_id"],
-                    match["loser_id"],
-                    match["loser2_id"],
-                ]
-
-                # On récupère les 4 profils en une seule requête
-                profiles_res = (
-                    self.supabase.table("profiles").select("*").in_("id", ids).execute()
-                )
-                # On crée un dictionnaire pour accéder aux infos facilement par ID
+                ids = [match["winner_id"], match["winner2_id"], match["loser_id"], match["loser2_id"]]
+                profiles_res = self.supabase.table("profiles").select("*").in_("id", ids).execute()
                 p_map = {p["id"]: p for p in profiles_res.data}
 
-                # Calcul de la MOYENNE Elo des équipes (sur le classement 2v2)
-                # Note: On utilise .get(..., 1000) par sécurité si un champ est vide
                 w1_elo = p_map[match["winner_id"]].get("elo_2v2", 1000)
                 w2_elo = p_map[match["winner2_id"]].get("elo_2v2", 1000)
                 l1_elo = p_map[match["loser_id"]].get("elo_2v2", 1000)
@@ -339,38 +253,30 @@ class DBManager:
                 team_win_avg = (w1_elo + w2_elo) / 2
                 team_lose_avg = (l1_elo + l2_elo) / 2
 
-                # Calcul du Delta basé sur les moyennes
-                # (On passe 0, 0 pour les matchs car on ne pondère pas par l'expérience en équipe pour l'instant)
-                _, _, delta = engine.compute_new_ratings(
-                    team_win_avg, team_lose_avg, 0, 0
-                )
+                _, _, gain, loss = engine.compute_new_ratings(team_win_avg, team_lose_avg, 0, 0)
 
-                # Mise à jour des 2 GAGNANTS (Colonne 2v2)
                 for wid in [match["winner_id"], match["winner2_id"]]:
                     curr = p_map[wid]
-                    self.supabase.table("profiles").update(
-                        {
-                            "elo_2v2": curr.get("elo_2v2", 1000) + delta,
-                            "matches_2v2": curr.get("matches_2v2", 0) + 1,
-                        }
-                    ).eq("id", wid).execute()
+                    self.supabase.table("profiles").update({
+                        "elo_2v2": curr.get("elo_2v2", 1000) + gain,
+                        "matches_2v2": curr.get("matches_2v2", 0) + 1,
+                    }).eq("id", wid).execute()
 
-                # Mise à jour des 2 PERDANTS (Colonne 2v2)
                 for lid in [match["loser_id"], match["loser2_id"]]:
                     curr = p_map[lid]
-                    self.supabase.table("profiles").update(
-                        {
-                            "elo_2v2": curr.get("elo_2v2", 1000) - delta,
-                            "matches_2v2": curr.get("matches_2v2", 0) + 1,
-                        }
-                    ).eq("id", lid).execute()
+                    self.supabase.table("profiles").update({
+                        "elo_2v2": curr.get("elo_2v2", 1000) - loss,
+                        "matches_2v2": curr.get("matches_2v2", 0) + 1,
+                    }).eq("id", lid).execute()
 
             # =========================================================
-            # VALIDATION FINALE (COMMUN AUX DEUX MODES)
+            # VALIDATION FINALE : On enregistre elo_gain ET elo_loss
             # =========================================================
-            self.supabase.table("matches").update(
-                {"status": "validated", "elo_gain": delta}
-            ).eq("id", match_id).execute()
+            self.supabase.table("matches").update({
+                "status": "validated", 
+                "elo_gain": gain, 
+                "elo_loss": loss
+            }).eq("id", match_id).execute()
 
             return True, "Match validé et classements mis à jour !"
 
