@@ -8,6 +8,7 @@ from datetime import datetime
 import pytz
 from ranks_config import RANK_TIERS
 import textwrap
+from badges_config import BADGES_B64  # <-- Ajout de cette ligne
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
@@ -369,7 +370,8 @@ def get_badges_html(player, matches_history):
     """
 
     # --- 1. CALCUL DES STATS ---
-    total_matches = player.get("matches_played", 0) + player.get("matches_2v2", 0)
+    # 🔴 CORRECTION ICI : On utilise la longueur de l'historique complet pour ne pas être affecté par le reset de saison !
+    total_matches = len(matches_history)
     wins = 0
     current_streak = 0
     unique_opponents = set()
@@ -439,7 +441,23 @@ def get_badges_html(player, matches_history):
     # --- 2. GÉNÉRATEUR DE HTML ---
     html_parts = []
 
-    def process_tier_badge(current_val, tiers, shape, base_icon, label):
+    # --- Dictionnaire des couleurs magiques ---
+    # Tu peux ajuster ces codes couleurs hexadécimaux selon tes goûts
+    TIER_COLORS = {
+        "bronze": "#cd7f32",
+        "silver": "#c0c0c0",
+        "gold": "#ffd700",
+        "platinum": "#00e5ff", # Un cyan brillant fait très "Platine/Diamant"
+        "magma": "#ff4500",
+        "electric": "#ffd700",
+        "blood": "#ff0000",
+        "locked": "#444444"
+    }
+
+    def process_tier_badge(current_val, tiers, base_image_url, label):
+        # 🛡️ LE BULLDOZER : Retire guillemets, retours à la ligne et espaces !
+        clean_url = base_image_url.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').replace(' ', '')
+        
         achieved_tier = None
         next_tier = None
         for tier in tiers:
@@ -454,22 +472,119 @@ def get_badges_html(player, matches_history):
         if achieved_tier:
             style = achieved_tier["style"]
             name = achieved_tier["name"]
+            color = TIER_COLORS.get(style, "#ffffff")
             if next_tier:
                 tooltip_text = f"✅ {name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Prochain : {next_tier['name']} ({next_tier['req']} {label})</span>"
             else:
                 tooltip_text = f"🏆 NIVEAU MAX<br>{name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>Vous êtes une légende !</span>"
             css_class = ""
-            icon = base_icon
         else:
             first_tier = tiers[0]
-            style = first_tier["style"]
+            style = "locked"
             name = first_tier["name"]
+            color = TIER_COLORS["locked"]
             tooltip_text = f"🔒 BLOQUÉ<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Objectif : {first_tier['req']} {label}</span>"
             css_class = "locked"
-            icon = base_icon
 
-        badge_html = f'<div class="badge-item {css_class}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div><span class="tooltip-content">{tooltip_text}</span></div>'
+        # 🔴 NOUVEAU DESIGN : Pas de cadre, juste lueur & image plus grosse
+        badge_html = f'''<div class="badge-item {css_class}" style="position: relative; display: flex; flex-direction: column; align-items: center; margin: 10px; width: 80px;">
+<div style="width: 70px; height: 70px; display: flex; justify-content: center; align-items: center; position: relative;">
+<img src="{clean_url}" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />
+</div>
+<div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; color: {color if style != 'locked' else '#888'}; text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); text-align: center;">{name}</div>
+<span class="tooltip-content">{tooltip_text}</span>
+</div>'''
         html_parts.append(badge_html)
+    
+    def add_special(cond, style, image_url, name, desc, current_stat=""):
+        # 🛡️ LE BULLDOZER
+        clean_url = image_url.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').replace(' ', '')
+        
+        css_class = "" if cond else "locked"
+        color = TIER_COLORS.get(style, "#ffffff") if cond else TIER_COLORS["locked"]
+        
+        stat_line = f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>" if current_stat else ""
+        if cond:
+            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
+        else:
+            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
+
+        # 🔴 PAREIL ICI : Pas d'hexagone, lueur intense & image grosse
+        badge_html = f'''<div class="badge-item {css_class}" style="position: relative; display: flex; flex-direction: column; align-items: center; margin: 10px; width: 80px;">
+<div style="width: 70px; height: 70px; display: flex; justify-content: center; align-items: center; position: relative;">
+<img src="{clean_url}" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />
+</div>
+<div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; color: {color if cond else '#888'}; text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); text-align: center;">{name}</div>
+<span class="tooltip-content">{tooltip_text}</span>
+</div>'''
+        html_parts.append(badge_html)
+
+    # --- 3. DÉFINITION DES PALIERS ---
+    
+    # 1. Palier Fidélité (Matchs)
+    tiers_fidelity = [
+        {"req": 10, "style": "bronze", "name": "Rookie"},
+        {"req": 50, "style": "silver", "name": "Confirmé"},
+        {"req": 100, "style": "gold", "name": "Pilier"},
+        {"req": 200, "style": "platinum", "name": "Légende"},
+    ]
+    process_tier_badge(total_matches, tiers_fidelity, BADGES_B64["fidelite"], "matchs")
+
+    # 2. Palier Victoire
+    tiers_victory = [
+        {"req": 10, "style": "bronze", "name": "Gâchette"},
+        {"req": 25, "style": "silver", "name": "Conquérant"},
+        {"req": 50, "style": "gold", "name": "Champion"},
+        {"req": 100, "style": "platinum", "name": "Invincible"},
+    ]
+    process_tier_badge(wins, tiers_victory, BADGES_B64["victoire"], "victoires")
+
+    # 3. Palier Duo
+    tiers_duo = [
+        {"req": 10, "style": "bronze", "name": "Binôme"},
+        {"req": 30, "style": "silver", "name": "Frères d'armes"},
+        {"req": 60, "style": "gold", "name": "Fusion"},
+        {"req": 120, "style": "platinum", "name": "Symbiose"},
+    ]
+    process_tier_badge(max_duo_matches, tiers_duo, BADGES_B64["duo"], "matchs ensemble")
+
+    # 4. Palier Social
+    tiers_social = [
+        {"req": 5, "style": "bronze", "name": "Explorateur"},
+        {"req": 10, "style": "silver", "name": "Voyageur"},
+        {"req": 20, "style": "gold", "name": "Monde"},
+        {"req": 40, "style": "platinum", "name": "Universel"},
+    ]
+    process_tier_badge(nb_unique, tiers_social, BADGES_B64["social"], "adversaires")
+
+    # 5. Badges Spéciaux
+    add_special(
+        current_streak >= 5,
+        "magma",
+        BADGES_B64["on_fire"],
+        "On Fire",
+        "Série de 5 victoires",
+        f"Série : {current_streak}",
+    )
+    add_special(
+        has_marathon,
+        "electric",
+        BADGES_B64["marathon"],
+        "Marathon",
+        "10 matchs en 1 jour",
+        f"Record jour : {max_daily_matches}",
+    )
+    add_special(
+        has_giant_kill,
+        "blood",
+        BADGES_B64["tueur"],
+        "Tueur",
+        "Battre un +200 Elo",
+        "Accompli !" if has_giant_kill else "Pas encore...",
+    )
+
+    container_style = "display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
+    return f'<div style="{container_style}">{"".join(html_parts)}</div>'
     
     def add_special(cond, shape, style, icon, name, desc, current_stat=""):
         css = "" if cond else "locked"
@@ -1078,66 +1193,115 @@ if st.sidebar.button("Déconnexion"):
 elif page == "🏆 Classement":
     st.header("🏆 Classement Général")
 
-    # 1. Le Sélecteur de Mode
-    ranking_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True)
-    mode_db = "1v1" if ranking_mode == "Solo (1v1)" else "2v2"
+    # Création des deux sous-onglets
+    tab_current, tab_archives = st.tabs(["🔥 Saison en cours", "🏛️ Archives des Saisons"])
 
-    # 2. Récupération des données triées
-    res = db.get_leaderboard(mode=mode_db)
+    with tab_current:
+        # 1. Le Sélecteur de Mode
+        ranking_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True, key="rank_current")
+        mode_db = "1v1" if ranking_mode == "Solo (1v1)" else "2v2"
 
-    if not res.data:
-        st.info("Aucun joueur n'est encore inscrit.")
-    else:
-        # 3. Préparation des données
-        if mode_db == "1v1":
-            target_elo = "elo_rating"
-            target_matches = "matches_played"
+        # 2. Récupération des données triées
+        res = db.get_leaderboard(mode=mode_db)
+
+        if not res.data:
+            st.info("Aucun joueur n'est encore inscrit.")
         else:
-            target_elo = "elo_2v2"
-            target_matches = "matches_2v2"
+            # 3. Préparation des données
+            if mode_db == "1v1":
+                target_elo = "elo_rating"
+                target_matches = "matches_played"
+            else:
+                target_elo = "elo_2v2"
+                target_matches = "matches_2v2"
 
-        df = pd.DataFrame(res.data)
-        df = df[df[target_matches] > 0] # Uniquement les actifs
+            df = pd.DataFrame(res.data)
+            df = df[df[target_matches] > 0] # Uniquement les actifs
 
-        if df.empty:
-            st.info("Aucun joueur classé pour le moment dans ce mode.")
+            if df.empty:
+                st.info("Aucun joueur classé pour le moment dans ce mode.")
+            else:
+                # --- ANONYMISATION ---
+                def anonymize(row):
+                    if row.get("is_hidden_leaderboard", False) and row["id"] != user["id"]:
+                        return "🕵️ Joueur Masqué"
+                    return row["username"]
+
+                df["username"] = df.apply(anonymize, axis=1)
+
+                # 4. Création de la liste pour le tableau VIP
+                list_data = []
+                
+                # On trie le dataframe par Elo
+                df = df.sort_values(by=target_elo, ascending=False).reset_index(drop=True)
+
+                for index, row in df.iterrows():
+                    joueur_elo = row[target_elo]
+                    rank_info = get_rank_info(joueur_elo)
+                    icone_html = rank_info["icon"]
+
+                    list_data.append({
+                        "Rang": index + 1,
+                        "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{icone_html} <span>{row['username']}</span></div>",
+                        "Points Elo": f"<b>{int(joueur_elo)}</b> <span style='color: #ffd700;'>⭐️</span>",
+                        "Matchs": f"{int(row[target_matches])} 🎮"
+                    })
+                
+                st.markdown(draw_luxury_table(list_data), unsafe_allow_html=True)
+
+    with tab_archives:
+        st.markdown("#### 📜 Explorer le passé")
+        res_archives = db.supabase.table("season_archives").select("season_name").execute()
+        
+        if not res_archives.data:
+            st.info("Aucune saison n'a encore été archivée. Clôturez une saison depuis le Panel Admin !")
         else:
-            # --- ANONYMISATION ---
-            def anonymize(row):
-                if row.get("is_hidden_leaderboard", False) and row["id"] != user["id"]:
-                    return "🕵️ Joueur Masqué"
-                return row["username"]
-
-            df["username"] = df.apply(anonymize, axis=1)
-
-            # 4. Création de la liste pour le tableau VIP
-            list_data = []
+            # Récupérer les noms uniques de saisons
+            archived_names = sorted(list(set([s['season_name'] for s in res_archives.data])), reverse=True)
             
-            # On trie le dataframe par Elo (au cas où la DB ne l'aurait pas fait parfaitement)
-            df = df.sort_values(by=target_elo, ascending=False).reset_index(drop=True)
+            c1, c2 = st.columns(2)
+            selected_season = c1.selectbox("Sélectionner la saison :", archived_names)
+            arch_mode = c2.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True, key="rank_archive")
+            arch_mode_db = "1v1" if arch_mode == "Solo (1v1)" else "2v2"
 
-            for index, row in df.iterrows():
-                joueur_elo = row[target_elo]
-                
-                # Récupération des infos de rang (depuis ranks_config via app.py)
-                rank_info = get_rank_info(joueur_elo)
-                
-                # On récupère l'icône Base64 (qui contient déjà la balise <img...>)
-                icone_html = rank_info["icon"]
-
-                # 5. Construction de la ligne du tableau
-                list_data.append({
-                    "Rang": index + 1,
-                    # On place l'icône juste avant le nom
-                    "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{icone_html} <span>{row['username']}</span></div>",
-                    "Points Elo": f"<b>{int(joueur_elo)}</b> <span style='color: #ffd700;'>⭐️</span>",
-                    "Matchs": f"{int(row[target_matches])} 🎮"
-                })
+            # 🔴 CORRECTION : On utilise la colonne "final_rank" ou "final_elo" (colonnes d'archives)
+            try:
+                # On essaie de trier par la colonne "final_elo" nativement
+                archive_data = db.supabase.table("season_archives").select("*").eq("season_name", selected_season).eq("mode", arch_mode_db).order("final_elo", desc=True).execute().data
+            except Exception:
+                # SÉCURITÉ : Si "final_elo" n'existe pas, on récupère tout en vrac et on triera en Python pour éviter le crash !
+                archive_data = db.supabase.table("season_archives").select("*").eq("season_name", selected_season).eq("mode", arch_mode_db).execute().data
             
-            # L'affichage final avec ta fonction de luxe
-            # Elle recevra le HTML de l'icône et l'affichera grâce à unsafe_allow_html=True
-            st.markdown(draw_luxury_table(list_data), unsafe_allow_html=True)
-
+            if not archive_data:
+                st.info(f"Aucun classement trouvé pour **{selected_season}** en **{arch_mode}**.")
+            else:
+                list_arch = []
+                
+                # Boucle sécurisée qui s'adapte au nom exact de tes colonnes d'archives
+                for index, row in enumerate(archive_data):
+                    # Cherche la valeur Elo sous différents noms possibles
+                    score_elo = row.get("final_elo", row.get("elo", row.get("elo_rating", 1000)))
+                    
+                    # Cherche le nombre de matchs
+                    nb_matchs = row.get("matches_played", row.get("final_matches", 0))
+                    
+                    # Cherche le rang final
+                    final_rank = row.get("final_rank", index + 1)
+                    
+                    rank_info = get_rank_info(score_elo)
+                    
+                    list_arch.append({
+                        "Rang": final_rank,
+                        "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{rank_info['icon']} <span>{row.get('username', 'Inconnu')}</span></div>",
+                        "Points Elo": f"<b>{int(score_elo)}</b> <span style='color: #a0aec0;'>pts</span>",
+                        "Matchs Joués": f"{int(nb_matchs)} 🎮"
+                    })
+                
+                # Tri de sécurité en Python au cas où le tri Supabase aurait échoué
+                list_arch = sorted(list_arch, key=lambda x: int(x["Rang"]))
+                
+                st.markdown(draw_luxury_table(list_arch, title=f"Classement Final - {selected_season}"), unsafe_allow_html=True)
+                
 elif page == "👤 Profils Joueurs":
     # --- 0. SÉLECTION DU JOUEUR ---
     players_res = db.get_leaderboard()
@@ -1186,12 +1350,64 @@ elif page == "👤 Profils Joueurs":
     badge_html = draw_rank_badge(target_elo)
     st.markdown(badge_html, unsafe_allow_html=True)
     
-    # 2. On affiche le Titre juste en dessous, sans les guillemets « »
+    # 2. On affiche le Titre juste en dessous - Version Emblème de Rang
     equipped_title = target_user.get("equipped_title")
     if equipped_title:
+        # Initialisations par défaut
+        rank_color = "#C69C25" # Or Snook'R par défaut
+        title_icon = "" # L'emblème du grade ou podium
+
+        # --- 1. DÉTERMINATION DE L'ICÔNE ET DE LA COULEUR ---
+
+        # Cas spéciaux : Le Podium (prioritaire car "Champion" ne commence pas par un rang)
+        if "Champion" in equipped_title:
+            rank_color = "#FFD700" # Or éclatant
+            title_icon = "🥇" # Médaille d'or
+        elif "Dauphin" in equipped_title:
+            rank_color = "#E0FFFF" # Argent
+            title_icon = "🥈" # Médaille d'argent
+        elif "3ème" in equipped_title:
+            rank_color = "#CD7F32" # Bronze
+            title_icon = "🥉" # Médaille de bronze
+        else:
+            # Cas normal : Les Grades (on cherche du plus HAUT au plus BAS dans RANK_TIERS)
+            found_rank = False
+            for tier in reversed(RANK_TIERS):
+                if equipped_title.startswith(tier["name"]):
+                    rank_color = tier.get("color", "#C69C25")
+                    # 🔴 ICI : On récupère l'icône définie dans ranks_config.py
+                    title_icon = tier.get("icon", "🔰") # Fallback si pas d'icône définie
+                    found_rank = True
+                    break
+            
+            # Si vraiment aucun rang trouvé dans config (peu probable), icône générique
+            if not found_rank:
+                title_icon = "🔰" # Icône de rang par défaut
+
+        # --- 2. AFFICHAGE DU BADGE STYLÉ AVEC EMBLÈME ---
         st.markdown(f"""
-            <div style='text-align: center; color: #C69C25; font-style: italic; font-size: 1.3em; margin-top: 10px; margin-bottom: 20px; font-family: "Playfair Display", serif; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);'>
-                {equipped_title}
+            <div style='
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 12px;
+                background: linear-gradient(135deg, {rank_color} 0%, color-mix(in srgb, {rank_color} 50%, black) 100%);
+                border: 2px solid rgba(255,255,255,0.2);
+                border-radius: 50px;
+                padding: 10px 25px;
+                color: white;
+                font-weight: bold;
+                font-family: "Playfair Display", serif;
+                font-size: 1.25em;
+                font-style: italic;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), 0 0 15px color-mix(in srgb, {rank_color} 70%, white);
+                text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+                margin: 20px auto;
+                width: fit-content;
+                letter-spacing: 0.5px;
+            '>
+                <span style="font-size: 1.5em; display: flex; align-items: center;">{title_icon}</span>
+                <span>{equipped_title}</span>
             </div>
         """, unsafe_allow_html=True)
     else:
@@ -1200,377 +1416,360 @@ elif page == "👤 Profils Joueurs":
     st.divider()
 
     # ==========================================
-    # 🏆 VITRINE 1 : LE PANTHÉON (GRANDS TOURNOIS)
+    # 🏆 VITRINES DE PALMARÈS (PODIUM UNIQUEMENT)
     # ==========================================
+    
+    # --- 1. PRÉPARATION & NETTOYAGE DES IMAGES ---
+    def clean_b64(key):
+        raw = BADGES_B64.get(key, "")
+        return raw.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').replace(' ', '')
+
+    img_or = clean_b64("medaille_or")
+    img_argent = clean_b64("medaille_argent")
+    img_bronze = clean_b64("medaille_bronze")
+
+    # --- 2. CONFIGURATION DES STYLES (OR, ARGENT, BRONZE) ---
+    RARETY_STYLES = {
+        1: {"color": "#FFD700", "label": "Or", "img": img_or, "emoji": "🥇"},
+        2: {"color": "#C0C0C0", "label": "Argent", "img": img_argent, "emoji": "🥈"},
+        3: {"color": "#CD7F32", "label": "Bronze", "img": img_bronze, "emoji": "🥉"}
+    }
+
+    def render_trophy_card(rank_key, count):
+        """Génère le HTML d'une carte de trophée avec style dynamique"""
+        cfg = RARETY_STYLES.get(rank_key)
+        if not cfg: return ""
+        
+        color = cfg["color"]
+        card_css = f"border: 2px solid {color}; border-radius: 12px; padding: 15px; text-align: center; background: color-mix(in srgb, {color} 7%, transparent); min-width: 125px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center;"
+        number_css = f"font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: {color}; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);"
+        label_css = "font-size: 0.85em; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.8; margin-top: 8px; color: white;"
+
+        if cfg["img"]:
+            icon_html = f'<img src="{cfg["img"]}" style="width: 55px; height: 55px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />'
+        else:
+            icon_html = f'<div style="font-size: 2.5em;">{cfg["emoji"]}</div>'
+
+        return f"<div style='{card_css}'>{icon_html}<div style='{label_css}'>{cfg['label']}</div><div style='{number_css}'>{count}</div></div>"
+
+    def get_list_icon(rank):
+        """Génère l'icône pour les listes détaillées (Podium ou Médaille militaire)"""
+        cfg = RARETY_STYLES.get(rank)
+        if cfg:
+            if cfg["img"]:
+                return f'<img src="{cfg["img"]}" style="width: 25px; height: 25px; object-fit: contain; filter: drop-shadow(0 0 5px {cfg["color"]}); margin-right: 15px;" />'
+            return f'<span style="font-size: 1.4em; margin-right: 15px;">{cfg["emoji"]}</span>'
+        return "<span style='font-size: 1.4em; margin-right: 15px;'>🎖️</span>"
+
+    # --- VITRINE 1 : LE PANTHÉON (GRANDS TOURNOIS) ---
     st.subheader("🏆 Le Panthéon")
     gt_stats = db.get_user_gt_stats(target_user["id"])
     
-    # --- STYLE DES CARTES (Épuré, Doré et Robuste) ---
-    card_style = "border: 1px solid #C69C25; border-radius: 10px; padding: 15px; text-align: center; background: rgba(198, 156, 37, 0.05); min-width: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"
-    label_style = "font-size: 0.85em; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.8;"
-    number_style = "font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: #C69C25; margin-top: 5px;"
-
     if not gt_stats:
         st.caption("Aucune participation en Grand Tournoi pour le moment.")
     else:
-        podium_finishes = [s for s in gt_stats if s.get('final_rank') in [1, 2, 3]]
-        gt_gold = sum(1 for s in podium_finishes if s['final_rank'] == 1)
-        gt_silver = sum(1 for s in podium_finishes if s['final_rank'] == 2)
-        gt_bronze = sum(1 for s in podium_finishes if s['final_rank'] == 3)
+        gt_counts = {r: sum(1 for s in gt_stats if s.get('final_rank') == r) for r in [1, 2, 3]}
         
-        cards_html = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
-        if gt_gold > 0:
-            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥇</div><div style='{label_style}'>Or</div><div style='{number_style}'>{gt_gold}</div></div>"
-        if gt_silver > 0:
-            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥈</div><div style='{label_style}'>Argent</div><div style='{number_style}'>{gt_silver}</div></div>"
-        if gt_bronze > 0:
-            cards_html += f"<div style='{card_style}'><div style='font-size: 2em;'>🥉</div><div style='{label_style}'>Bronze</div><div style='{number_style}'>{gt_bronze}</div></div>"
-        cards_html += "</div>"
-        
-        st.markdown(cards_html, unsafe_allow_html=True)
+        html_gt = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
+        for r in [1, 2, 3]:
+            if gt_counts[r] > 0:
+                html_gt += render_trophy_card(r, gt_counts[r])
+        html_gt += "</div>"
+        st.markdown(html_gt, unsafe_allow_html=True)
 
-        # Le détail du palmarès
         with st.expander("📜 Palmarès détaillé (Grands Tournois)"):
             html_list = "<div style='padding-top: 5px;'>"
             for s in sorted(gt_stats, key=lambda x: x.get('final_rank', 999)):
                 rank = s.get('final_rank')
                 t_name = s.get('grand_tournaments', {}).get('name', 'Tournoi Inconnu')
-                
-                if rank == 1: emoji = "🥇"
-                elif rank == 2: emoji = "🥈"
-                elif rank == 3: emoji = "🥉"
-                else: emoji = "🎖️"
-                
+                icon = get_list_icon(rank)
                 rank_text = f"{rank}{'er' if rank==1 else 'ème'}" if rank in [1, 2, 3] else f"Top {rank}"
-                
-                html_list += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(198, 156, 37, 0.2); display: flex; align-items: center;'><span style='font-size: 1.4em; margin-right: 15px;'>{emoji}</span><span><b>{rank_text}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i></span></div>"
-            html_list += "</div>"
-            st.markdown(html_list, unsafe_allow_html=True)
+                html_list += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;'>{icon}<span><b>{rank_text}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i></span></div>"
+            st.markdown(html_list + "</div>", unsafe_allow_html=True)
 
-    # ==========================================
-    # 🏅 VITRINE 2 : SUCCÈS DE CARRIÈRE (Anciens badges)
-    # ==========================================
+    # --- VITRINE 2 : SUCCÈS DE CARRIÈRE ---
     st.divider()
     st.subheader("🏅 Succès de Carrière")
-    raw_matches = (
-        db.supabase.table("matches")
-        .select("*")
-        .eq("status", "validated")
-        .execute()
-        .data
-    )
-
-    user_full_history = [
-        m for m in raw_matches
-        if m["winner_id"] == target_user["id"]
-        or m["loser_id"] == target_user["id"]
-        or m.get("winner2_id") == target_user["id"]
-        or m.get("loser2_id") == target_user["id"]
-    ]
-
+    raw_matches = db.supabase.table("matches").select("*").in_("status", ["validated", "archived"]).execute().data
+    user_full_history = [m for m in raw_matches if target_user["id"] in [m["winner_id"], m["loser_id"], m.get("winner2_id"), m.get("loser2_id")]]
     st.markdown(get_badges_html(target_user, user_full_history), unsafe_allow_html=True)
 
-    # ==========================================
-    # 🎉 VITRINE 3 : LE MUR DU FUN (WEEKLY FUN)
-    # ==========================================
+    # --- VITRINE 3 : LE MUR DU FUN (WEEKLY FUN) ---
     st.divider()
     st.subheader("🎉 Le Mur du Fun")
-    
     weekly_stats = db.get_user_weekly_stats(target_user["id"])
     
     if not weekly_stats:
         st.caption("Aucune participation aux soirées Weekly Fun pour le moment.")
     else:
-        w_gold = sum(1 for s in weekly_stats if s['final_rank'] == 1)
-        w_silver = sum(1 for s in weekly_stats if s['final_rank'] == 2)
-        w_bronze = sum(1 for s in weekly_stats if s['final_rank'] == 3)
-        w_choco = sum(1 for s in weekly_stats if s['final_rank'] > 3)
+        # On ne compte QUE le podium
+        w_counts = {r: sum(1 for s in weekly_stats if s['final_rank'] == r) for r in [1, 2, 3]}
         
-        cards_html_w = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
-        if w_gold > 0:
-            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥇</div><div style='{label_style}'>Or</div><div style='{number_style}'>{w_gold}</div></div>"
-        if w_silver > 0:
-            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥈</div><div style='{label_style}'>Argent</div><div style='{number_style}'>{w_silver}</div></div>"
-        if w_bronze > 0:
-            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🥉</div><div style='{label_style}'>Bronze</div><div style='{number_style}'>{w_bronze}</div></div>"
-        if w_choco > 0:
-            # Pour le chocolat, on change juste la couleur du texte du chiffre pour qu'il soit marron cuivré
-            choco_number = "font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: #A0522D; margin-top: 5px;"
-            cards_html_w += f"<div style='{card_style}'><div style='font-size: 2em;'>🍫</div><div style='{label_style}'>Chocolat</div><div style='{choco_number}'>{w_choco}</div></div>"
-        cards_html_w += "</div>"
-        
-        st.markdown(cards_html_w, unsafe_allow_html=True)
+        html_w = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
+        for r in [1, 2, 3]:
+            if w_counts[r] > 0:
+                html_w += render_trophy_card(r, w_counts[r])
+        html_w += "</div>"
+        st.markdown(html_w, unsafe_allow_html=True)
 
         with st.expander("📜 Palmarès détaillé (Weekly Fun)"):
             html_list_w = "<div style='padding-top: 5px;'>"
             for s in sorted(weekly_stats, key=lambda x: x['weekly_tournaments']['event_date'] if x.get('weekly_tournaments') else '', reverse=True):
                 rank = s['final_rank']
-                emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🍫"
+                icon = get_list_icon(rank)
                 t_name = s.get('weekly_tournaments', {}).get('name', 'Tournoi Inconnu')
-                
-                t_date_raw = s.get('weekly_tournaments', {}).get('event_date')
-                t_date = pd.to_datetime(t_date_raw).strftime('%d/%m/%y') if t_date_raw else "Date inconnue"
-                
-                html_list_w += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(198, 156, 37, 0.2); display: flex; align-items: center;'><span style='font-size: 1.4em; margin-right: 15px;'>{emoji}</span><span><b>{rank}{'er' if rank==1 else 'ème'}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i> <span style='opacity: 0.4; font-size: 0.85em; margin-left: 6px;'>({t_date})</span></span></div>"
-            html_list_w += "</div>"
-            st.markdown(html_list_w, unsafe_allow_html=True)
+                t_date = pd.to_datetime(s.get('weekly_tournaments', {}).get('event_date')).strftime('%d/%m/%y') if s.get('weekly_tournaments') else "??/??/??"
+                html_list_w += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;'>{icon}<span><b>{rank}{'er' if rank==1 else 'ème'}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i> <span style='opacity: 0.4; font-size: 0.85em; margin-left: 6px;'>({t_date})</span></span></div>"
+            st.markdown(html_list_w + "</div>", unsafe_allow_html=True)
 
     st.divider()
 
     # ==========================================
-    # 📈 STATISTIQUES ET COURBES ELO
+    # 📊 CENTRE DE STATISTIQUES AVANCÉES
     # ==========================================
-    # --- 1. SÉLECTEUR DE MODE (1v1 / 2v2) ---
-    view_mode = st.radio(
-        "Voir les statistiques :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True
-    )
+    st.divider()
+    st.subheader("📊 Centre de Statistiques")
+
+    # --- 1. SÉLECTEUR DE MODE ---
+    view_mode = st.radio("Mode de jeu :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True, key="stats_mode_select")
     target_mode_db = "1v1" if view_mode == "Solo (1v1)" else "2v2"
 
-    # --- 2. RÉCUPÉRATION DES MATCHS DU MODE CHOISI ---
-    all_validated_matches = (
-        db.supabase.table("matches")
-        .select("*")
-        .eq("status", "validated")
-        .eq("mode", target_mode_db)
-        .order("created_at", desc=False)
-        .execute()
-        .data
-    )
+    # --- 2. RÉCUPÉRATION DE TOUS LES MATCHS DU JOUEUR ---
+    raw_matches = db.supabase.table("matches").select("*").in_("status", ["validated", "archived"]).eq("mode", target_mode_db).order("created_at", desc=False).execute().data
+    user_matches = [m for m in raw_matches if target_user["id"] in [m["winner_id"], m["loser_id"], m.get("winner2_id"), m.get("loser2_id")]]
+    
+    all_users_map = {p["id"]: p["username"] for p in db.get_all_profiles().data}
 
-    # --- 3. RECONSTRUCTION DE LA COURBE & STATS ---
-    match_counter = 0
-    win_counter = 0
-    loss_counter = 0
-
-    target_elo_curve = [{"Numéro": 0, "Date": "Début", "Elo": 1000}]
-
-    for m in all_validated_matches:
-        is_involved = (
-            m["winner_id"] == target_user["id"]
-            or m["loser_id"] == target_user["id"]
-            or m.get("winner2_id") == target_user["id"]
-            or m.get("loser2_id") == target_user["id"]
-        )
-
-        if is_involved:
-            match_counter += 1
-            dt_utc = pd.to_datetime(m["created_at"])
-            dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
-            date_display = dt_paris.strftime("%d/%m %Hh%M")
-
-            is_win = (m["winner_id"] == target_user["id"] or m.get("winner2_id") == target_user["id"])
-
-            if is_win:
-                win_counter += 1
-                # On utilise le gain réel stocké
-                delta = m.get("elo_gain", 0)
-            else:
-                loss_counter += 1
-                # --- LA CORRECTION EST ICI ---
-                # On utilise elo_loss. Si c'est un vieux match où elo_loss est vide, 
-                # on prend elo_gain par défaut pour ne pas planter.
-                delta = m.get("elo_loss")
-                if delta is None:
-                    delta = m.get("elo_gain", 0)
-
-            last_score = target_elo_curve[-1]["Elo"]
+    if not user_matches:
+        st.info(f"{target_user['username']} n'a joué aucun match classé en {view_mode}.")
+    else:
+        # --- 3. MOTEUR DE CALCUL STATISTIQUE (Par Saison & All-Time) ---
+        user_seasons = {} 
+        
+        # A. Initialisation des saisons
+        user_seasons["🔥 Saison en cours"] = {'matches': [], 'end_elo': target_user.get("elo_rating" if target_mode_db == "1v1" else "elo_2v2", 1000)}
+        arch_data = db.supabase.table("season_archives").select("*").eq("player_id", target_user["id"]).eq("mode", target_mode_db).execute().data
+        for arc in arch_data:
+            user_seasons[arc["season_name"]] = {'matches': [], 'end_elo': arc["final_elo"]}
             
-            # Si victoire on AJOUTE le gain, si défaite on SOUSTRAIT la perte
-            new_score = last_score + delta if is_win else last_score - delta
-
-            target_elo_curve.append({
-                "Numéro": match_counter,
-                "Date": date_display,
-                "Elo": new_score,
-                "Résultat": "Victoire" if is_win else "Défaite",
-            })
-
-    # --- 4. AFFICHAGE DE LA COURBE ET DES STATS ---
-    st.subheader(f"📈 Évolution {view_mode}")
-
-    if len(target_elo_curve) > 1:
-        df_curve = pd.DataFrame(target_elo_curve)
-        chart = (
-            alt.Chart(df_curve)
-            .mark_line(point=True, color="#3498db")
-            .encode(
-                x=alt.X("Numéro", title="Progression (Matchs joués)"),
-                y=alt.Y("Elo", scale=alt.Scale(zero=False), title="Score Elo"),
-                tooltip=["Date", "Elo", "Résultat"],
-            )
-            .properties(height=350)
-            .interactive()
-        )
-        st.altair_chart(chart, use_container_width=True)
-
-        current_elo = target_elo_curve[-1]["Elo"]
-        diff_total = current_elo - 1000
-        win_rate = (win_counter / match_counter * 100) if match_counter > 0 else 0
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric(f"Elo {view_mode}", current_elo, delta=diff_total)
-        k2.metric("Matchs Joués", match_counter)
-        k3.metric("Victoires", win_counter, f"{win_rate:.0f}%")
-        k4.metric("Défaites", loss_counter)
-
-    else:
-        st.info(f"{target_user['username']} n'a pas encore de match classé en {view_mode}.")
-
-    st.divider()
-
-    # --- 5. HISTORIQUE RÉCENT ---
-    st.subheader(f"🗓️ Derniers Matchs ({view_mode})")
-
-    my_matches = []
-    for m in all_validated_matches:
-        if (
-            m["winner_id"] == target_user["id"]
-            or m["loser_id"] == target_user["id"]
-            or m.get("winner2_id") == target_user["id"]
-            or m.get("loser2_id") == target_user["id"]
-        ):
-            my_matches.append(m)
-
-    recent_matches = my_matches[::-1][:10]
-    id_name = {p["id"]: p["username"] for p in all_players}
-
-    if not recent_matches:
-        st.write("Aucun historique dans ce mode.")
-    else:
-        history_data = []
-        for m in recent_matches:
-            is_win = (
-                m["winner_id"] == target_user["id"]
-                or m.get("winner2_id") == target_user["id"]
-            )
-
-            res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-            dt_utc = pd.to_datetime(m["created_at"])
-            dt_paris = (
-                dt_utc.tz_convert("Europe/Paris")
-                if dt_utc.tzinfo
-                else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
-            )
-            date_str = dt_paris.strftime("%d/%m à %Hh%M")
-            points = m.get("elo_gain", 0)
-            sign = "+" if is_win else "-"
-
-            if target_mode_db == "1v1":
-                opp_id = m["loser_id"] if is_win else m["winner_id"]
-                details = f"vs {id_name.get(opp_id, 'Inconnu')}"
-            else:
-                if m["winner_id"] == target_user["id"]:
-                    my_mate = m.get("winner2_id")
-                elif m.get("winner2_id") == target_user["id"]:
-                    my_mate = m["winner_id"]
-                elif m["loser_id"] == target_user["id"]:
-                    my_mate = m.get("loser2_id")
-                else:
-                    my_mate = m["loser_id"]
-
-                mate_name = id_name.get(my_mate, "?")
-
+        # B. Distribution des matchs dans les saisons
+        for m in user_matches:
+            s_name = m.get("season_name") if m.get("status") == "archived" else "🔥 Saison en cours"
+            if s_name not in user_seasons:
+                user_seasons[s_name] = {'matches': [], 'end_elo': 1000}
+            user_seasons[s_name]['matches'].append(m)
+            
+        # C. Variables Globales (All-Time)
+        all_time_peak = 1000
+        global_wins = 0
+        global_max_streak = 0
+        global_current_streak = 0
+        global_opponents = {}
+        global_dates = {}
+        
+        season_curves = {}
+        season_stats = {}
+        
+        # D. Calculs des courbes, pics et adversaires PAR SAISON
+        for s_name, s_data in user_seasons.items():
+            s_matches = s_data['matches']
+            if not s_matches and s_name != "🔥 Saison en cours": continue
+            
+            # Calcul du gain net pour trouver l'Elo de départ exact
+            net_gain = 0
+            for m in s_matches:
+                is_win = target_user["id"] in [m["winner_id"], m.get("winner2_id")]
+                delta = m.get("elo_loss", m.get("elo_gain", 0)) if not is_win else m.get("elo_gain", 0)
+                net_gain += delta if is_win else -delta
+                
+            start_elo = s_data['end_elo'] - net_gain
+            current_s_elo = start_elo
+            s_peak = start_elo
+            s_wins = 0
+            s_opponents = {} 
+            s_dates = {}
+            s_max_streak = 0
+            s_current_streak = 0
+            
+            curve = [{"Numéro": 0, "Date": "Début", "Elo": start_elo, "Gain": 0, "Résultat": "-"}]
+            
+            for i, m in enumerate(s_matches):
+                is_win = target_user["id"] in [m["winner_id"], m.get("winner2_id")]
+                delta = m.get("elo_loss", m.get("elo_gain", 0)) if not is_win else m.get("elo_gain", 0)
+                
+                # Traqueurs Globaux & Saison (Séries)
                 if is_win:
-                    opp_ids = [m["loser_id"], m.get("loser2_id")]
+                    global_wins += 1
+                    s_wins += 1
+                    global_current_streak += 1
+                    s_current_streak += 1
+                    global_max_streak = max(global_max_streak, global_current_streak)
+                    s_max_streak = max(s_max_streak, s_current_streak)
                 else:
-                    opp_ids = [m["winner_id"], m.get("winner2_id")]
+                    global_current_streak = 0
+                    s_current_streak = 0
+                    
+                # Traqueur adversaires (Saison & Global)
+                opp_ids = [m["loser_id"], m.get("loser2_id")] if is_win else [m["winner_id"], m.get("winner2_id")]
+                for oid in [oid for oid in opp_ids if oid]:
+                    s_opponents[oid] = s_opponents.get(oid, 0) + 1
+                    global_opponents[oid] = global_opponents.get(oid, 0) + 1
+                    
+                current_s_elo += delta if is_win else -delta
+                s_peak = max(s_peak, current_s_elo)
+                all_time_peak = max(all_time_peak, current_s_elo)
+                
+                dt_utc = pd.to_datetime(m["created_at"])
+                dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+                
+                # Traqueur Dates (Marathon)
+                day_str = dt_paris.strftime("%Y-%m-%d")
+                s_dates[day_str] = s_dates.get(day_str, 0) + 1
+                global_dates[day_str] = global_dates.get(day_str, 0) + 1
+                
+                curve.append({
+                    "Numéro": i + 1,
+                    "Date": dt_paris.strftime("%d/%m %Hh%M"),
+                    "Elo": current_s_elo,
+                    "Gain": delta if is_win else -delta,
+                    "Résultat": "Victoire" if is_win else "Défaite"
+                })
+            
+            # Formatage des stats de la saison
+            s_most_played = "Aucun"
+            if s_opponents:
+                top_oid, top_c = max(s_opponents.items(), key=lambda x: x[1])
+                s_most_played = f"{all_users_map.get(top_oid, 'Inconnu')} ({top_c} matchs)"
+                
+            s_max_day = max(s_dates.values()) if s_dates else 0
 
-                opp_names = [id_name.get(oid, "?") for oid in opp_ids if oid]
-                details = f"Avec {mate_name} vs {' & '.join(opp_names)}"
+            season_curves[s_name] = curve
+            season_stats[s_name] = {
+                "peak": s_peak,
+                "wins": s_wins,
+                "losses": len(s_matches) - s_wins,
+                "total": len(s_matches),
+                "start_elo": start_elo,
+                "end_elo": s_data['end_elo'],
+                "most_played": s_most_played,
+                "max_day": s_max_day,
+                "longest_streak": s_max_streak
+            }
 
-            history_data.append(
-                {
+        # Formatage des stats globales
+        g_most_played = "Aucun"
+        if global_opponents:
+            g_top_oid, g_top_c = max(global_opponents.items(), key=lambda x: x[1])
+            g_most_played = f"{all_users_map.get(g_top_oid, 'Inconnu')} ({g_top_c} matchs)"
+            
+        g_max_day = max(global_dates.values()) if global_dates else 0
+
+        # --- 4. AFFICHAGE DES STATS ALL-TIME ---
+        st.markdown("#### 🌍 Carrière (All-Time)")
+        global_matches = len(user_matches)
+        global_wr = (global_wins / global_matches * 100) if global_matches > 0 else 0
+        peak_rank_info = get_rank_info(all_time_peak)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Matchs Joués", global_matches)
+        c2.metric("Taux de Victoire", f"{global_wr:.1f}%", f"{global_wins} V - {global_matches - global_wins} D", delta_color="off")
+        c3.metric("Record Elo (Peak)", int(all_time_peak), peak_rank_info["name"])
+        c4.metric("Meilleure Série", f"{global_max_streak} victoires", "🔥 On Fire" if global_max_streak >= 5 else None)
+
+        c5, c6 = st.columns(2)
+        with c5.container(border=True):
+            st.markdown("<div style='font-size: 0.9em; opacity: 0.7;'>⚔️ Rival Principal (Le plus affronté)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size: 1.2em; font-weight: bold; color: #f39c12;'>{g_most_played}</div>", unsafe_allow_html=True)
+        with c6.container(border=True):
+            st.markdown("<div style='font-size: 0.9em; opacity: 0.7;'>⚡ Marathon (Max matchs en 1 jour)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size: 1.2em; font-weight: bold; color: #3498db;'>{g_max_day} matchs joués</div>", unsafe_allow_html=True)
+
+        st.write("")
+
+        # --- 5. AFFICHAGE DES STATS PAR SAISON ---
+        st.markdown("#### 📅 Analyse par Saison")
+        available_seasons = [s for s in ["🔥 Saison en cours"] + sorted(list(user_seasons.keys()), reverse=True) if s in season_stats]
+        # On dédoublonne la "saison en cours"
+        available_seasons = list(dict.fromkeys(available_seasons))
+
+        if available_seasons:
+            chosen_season = st.selectbox("Sélectionnez une saison à analyser :", available_seasons, label_visibility="collapsed")
+            stats = season_stats[chosen_season]
+            
+            s_wr = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
+            delta_net = stats['end_elo'] - stats['start_elo']
+            
+            st.markdown(f"**Bilan : {chosen_season}**")
+            k1, k2, k3, k4 = st.columns(4)
+            # 🔴 CORRECTION DU TEXTE DE VARIATION : Elo Final d'abord, la variation en dessous
+            k1.metric("Elo Final", int(stats['end_elo']), f"{int(delta_net):+} pts (Variation)")
+            k2.metric("Meilleur Elo", int(stats['peak']), get_rank_info(stats['peak'])["name"])
+            k3.metric("Matchs de Saison", stats['total'])
+            k4.metric("Victoires", stats['wins'], f"{s_wr:.0f}%", delta_color="off")
+            
+            # Affichage des 3 stats funs de la saison
+            if stats['total'] > 0:
+                s1, s2, s3 = st.columns(3)
+                with s1.container(border=True):
+                    st.markdown("<div style='font-size: 0.85em; opacity: 0.7;'>⚔️ Rival de la saison</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 1.1em; font-weight: bold; color: #f39c12;'>{stats['most_played']}</div>", unsafe_allow_html=True)
+                with s2.container(border=True):
+                    st.markdown("<div style='font-size: 0.85em; opacity: 0.7;'>🔥 Série d'invincibilité</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 1.1em; font-weight: bold; color: #e74c3c;'>{stats['longest_streak']} victoires</div>", unsafe_allow_html=True)
+                with s3.container(border=True):
+                    st.markdown("<div style='font-size: 0.85em; opacity: 0.7;'>⚡ Marathon</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 1.1em; font-weight: bold; color: #3498db;'>{stats['max_day']} matchs en 1j</div>", unsafe_allow_html=True)
+
+            df_season = pd.DataFrame(season_curves[chosen_season])
+            chart_s = (
+                alt.Chart(df_season)
+                .mark_line(point=True, color="#e74c3c" if delta_net < 0 else "#2ecc71")
+                .encode(
+                    x=alt.X("Numéro", title="Matchs joués", axis=alt.Axis(tickMinStep=1)),
+                    y=alt.Y("Elo", scale=alt.Scale(zero=False), title="Score Elo"),
+                    tooltip=["Date", "Elo", "Résultat", "Gain"],
+                ).properties(height=300).interactive()
+            )
+            st.altair_chart(chart_s, use_container_width=True)
+
+        # --- 6. HISTORIQUE DES DERNIERS MATCHS ---
+        with st.expander("📜 Historique des 15 derniers matchs", expanded=False):
+            recent_matches = user_matches[::-1][:15]
+            history_data = []
+            
+            for m in recent_matches:
+                is_win = (m["winner_id"] == target_user["id"] or m.get("winner2_id") == target_user["id"])
+                res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
+                
+                dt_utc = pd.to_datetime(m["created_at"])
+                dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
+                date_str = dt_paris.strftime("%d/%m à %Hh%M")
+                
+                points = m.get("elo_gain", 0) if is_win else m.get("elo_loss", m.get("elo_gain", 0))
+                sign = "+" if is_win else "-"
+
+                if target_mode_db == "1v1":
+                    opp_id = m["loser_id"] if is_win else m["winner_id"]
+                    details = f"vs {all_users_map.get(opp_id, 'Inconnu')}"
+                else:
+                    my_mate = m.get("winner2_id") if m["winner_id"] == target_user["id"] else \
+                              m["winner_id"] if m.get("winner2_id") == target_user["id"] else \
+                              m.get("loser2_id") if m["loser_id"] == target_user["id"] else m["loser_id"]
+                    mate_name = all_users_map.get(my_mate, "?")
+                    opp_ids = [m["loser_id"], m.get("loser2_id")] if is_win else [m["winner_id"], m.get("winner2_id")]
+                    opp_names = [all_users_map.get(oid, "?") for oid in opp_ids if oid]
+                    details = f"Avec {mate_name} vs {' & '.join(opp_names)}"
+
+                history_data.append({
                     "Date": date_str,
                     "Résultat": res_str,
                     "Détails": details,
                     "Points": f"{sign}{points}",
-                }
-            )
+                    "Saison": m.get("season_name", "En cours") if m["status"] == "archived" else "En cours"
+                })
 
-        st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("📈 Statistiques par Saison")
-
-    # --- 1. RÉCUPÉRATION DES SAISONS EXISTANTES ---
-    # On récupère les noms de saisons dans les archives (ex: "Mars 2026")
-    res_archives = db.supabase.table("season_archives").select("season_name").execute()
-    archived_names = list(set([s['season_name'] for s in res_archives.data])) if res_archives.data else []
-
-    # On prépare la saison en cours (toujours disponible)
-    now = datetime.now(pytz.timezone("Europe/Paris"))
-    month_map = {1:"Janvier", 2:"Février", 3:"Mars", 4:"Avril", 5:"Mai", 6:"Juin", 7:"Juillet", 8:"Août", 9:"Septembre", 10:"Octobre", 11:"Novembre", 12:"Décembre"}
-    current_season_name = f"{month_map[now.month]} {now.year}"
-    
-    # On fusionne le tout dans un dictionnaire structuré { Année: [Mois1, Mois2] }
-    all_seasons = archived_names + [current_season_name]
-    season_struct = {}
-    for s in all_seasons:
-        parts = s.split()
-        if len(parts) == 2:
-            m_txt, y_txt = parts[0], parts[1]
-            y_int = int(y_txt)
-            if y_int not in season_struct: season_struct[y_int] = []
-            if m_txt not in season_struct[y_int]: season_struct[y_int].append(m_txt)
-
-    # Tri des années (plus récente en premier)
-    available_years = sorted(list(season_struct.keys()), reverse=True)
-
-    # --- 2. INTERFACE DE RECHERCHE ---
-    col_search1, col_search2, col_search3 = st.columns([1, 1, 2])
-    
-    with col_search1:
-        chosen_year = st.selectbox("Année", available_years, index=0)
-        
-    with col_search2:
-        # On ne propose que les mois qui ont une saison pour l'année choisie
-        available_months = season_struct[chosen_year]
-        # On définit l'ordre chronologique pour le tri des mois
-        order = list(month_map.values())
-        available_months = sorted(available_months, key=lambda x: order.index(x))
-        
-        # On essaie de mettre le mois actuel par défaut si on est sur la bonne année
-        default_month_idx = 0
-        if chosen_year == now.year and month_map[now.month] in available_months:
-            default_month_idx = available_months.index(month_map[now.month])
-            
-        chosen_month = st.selectbox("Mois", available_months, index=default_month_idx)
-
-    with col_search3:
-        view_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True)
-        target_mode_db = "1v1" if view_mode == "Solo (1v1)" else "2v2"
-
-    # --- 3. FILTRAGE ET CALCUL ---
-    # On transforme le mois choisi en numéro pour filtrer les matchs
-    month_inv = {v: k for k, v in month_map.items()}
-    target_month_num = month_inv[chosen_month]
-
-    raw_matches = db.supabase.table("matches").select("*").eq("status", "validated").eq("mode", target_mode_db).order("created_at", desc=False).execute().data
-    
-    df_all = pd.DataFrame(raw_matches)
-    if not df_all.empty:
-        df_all['created_at'] = pd.to_datetime(df_all['created_at']).dt.tz_convert("Europe/Paris")
-        df_filtered = df_all[(df_all['created_at'].dt.year == chosen_year) & (df_all['created_at'].dt.month == target_month_num)]
-    else:
-        df_filtered = pd.DataFrame()
-
-    # (Ici tu gardes ta boucle de calcul de courbe target_elo_curve que l'on a déjà corrigée ensemble)
-    
-    # --- 6. PARAMÈTRES DU COMPTE ---
-    if not is_guest and target_user["id"] == user["id"]:
-        st.subheader("⚙️ Paramètres du compte")
-        
-        with st.expander("Changer mon mot de passe"):
-            new_pass = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password")
-            if st.button("Mettre à jour le mot de passe"):
-                if len(new_pass) < 6:
-                    st.warning("Le mot de passe doit faire au moins 6 caractères.")
-                else:
-                    success, msg = db.update_password(new_pass)
-                    if success:
-                        st.success("✅ " + msg)
-                    else:
-                        st.error(msg)
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Déclarer un résultat")
     
@@ -1832,7 +2031,7 @@ elif page == "🆚 Comparateur de joueurs":
     raw_matches = (
         db.supabase.table("matches")
         .select("*")
-        .eq("status", "validated")
+        .in_("status", ["validated", "archived"]) # CORRECTION ICI : Historique All-Time !
         .eq("mode", target_db_mode)
         .order("created_at", desc=False)
         .execute()
@@ -2478,79 +2677,76 @@ elif page == "🔧 Panel Admin":
                 st.balloons()
                 st.rerun()
 
-    # --- 4. SIMULATEUR FANTÔME (TEST ELO ASYMÉTRIQUE + DIVISEUR 600) ---
-    st.subheader("👻 Simulateur Fantôme (Asymétrique + Diviseur 600)")
-    st.info("Rejoue l'historique 1v1 avec K_Victoire=50, K_Défaite=30, ET un diviseur de 600 pour mieux tolérer la variance (le facteur chance) du billard.")
+    # --- OUTIL TEMPORAIRE : PURGE DES ÉMOJIS & TITRES MARS 2026 ---
+    st.divider()
+    with st.expander("🛠️ Nettoyer les émojis et réparer les titres (Mars 2026)"):
+        st.info("Ce bouton purge les émojis de la base de données et distribue les titres propres (sans emoji).")
+        if st.button("Purger et Distribuer", type="primary"):
+            try:
+                # 1. PURGE GLOBALE : On retire les émojis de tous les profils existants
+                all_profs = db.supabase.table("profiles").select("id, unlocked_titles, equipped_title").execute().data
+                for prof in all_profs:
+                    has_changed = False
+                    clean_titles = []
+                    if prof.get("unlocked_titles"):
+                        for t in prof["unlocked_titles"]:
+                            clean_t = t.replace("🏆 ", "").replace("🥈 ", "").replace("🥉 ", "").replace("🥇 ", "")
+                            clean_titles.append(clean_t)
+                            if clean_t != t: has_changed = True
+                    
+                    eq_title = prof.get("equipped_title")
+                    if eq_title:
+                        eq_title = eq_title.replace("🏆 ", "").replace("🥈 ", "").replace("🥉 ", "").replace("🥇 ", "")
+                        
+                    if has_changed or eq_title != prof.get("equipped_title"):
+                        db.supabase.table("profiles").update({"unlocked_titles": clean_titles, "equipped_title": eq_title}).eq("id", prof["id"]).execute()
 
-    if st.button("Lancer la simulation V2 (Diviseur 600) 🧪"):
-        status_text = st.empty()
-        status_text.text("⏳ Aspiration de l'historique 1v1 et tri chronologique...")
-        
-        import pandas as pd
-        
-        # 1. Récupération des données brutes (Uniquement 1v1 validés)
-        matches_res = db.supabase.table("matches").select("*").eq("status", "validated").eq("mode", "1v1").execute()
-        matches = matches_res.data if matches_res else []
-        
-        # 2. Tri chronologique strict
-        matches = sorted(matches, key=lambda x: pd.to_datetime(x["created_at"]))
-        
-        profiles_res = db.get_leaderboard(mode="1v1")
-        profiles = profiles_res.data if profiles_res else []
-        id_to_name = {p["id"]: p["username"] for p in profiles}
-        
-        # 3. Initialisation des Elos virtuels (Tout le monde part à 1000)
-        virtual_elo_1v1 = {p["id"]: 1000.0 for p in profiles}
-        
-        # 4. L'algorithme asymétrique AVEC LE NOUVEAU DIVISEUR (600)
-        def calc_asym_elo_v2(r_win, r_loss, k_win=50, k_loss=30, diviseur=600):
-            # Calcul des probabilités de victoire avec le diviseur adouci
-            exp_w = 1 / (1 + 10 ** ((r_loss - r_win) / diviseur))
-            exp_l = 1 / (1 + 10 ** ((r_win - r_loss) / diviseur))
-            
-            # Application des facteurs K
-            gain = k_win * (1 - exp_w)
-            perte = k_loss * (0 - exp_l) # Valeur négative
-            return r_win + gain, r_loss + perte
-
-        # 5. Replay de l'histoire
-        for m in matches:
-            w_id, l_id = m["winner_id"], m["loser_id"]
-            if w_id in virtual_elo_1v1 and l_id in virtual_elo_1v1:
-                new_w, new_l = calc_asym_elo_v2(virtual_elo_1v1[w_id], virtual_elo_1v1[l_id])
-                virtual_elo_1v1[w_id] = new_w
-                virtual_elo_1v1[l_id] = new_l
-
-        # 6. Tableau final
-        results = []
-        for p_id, p_name in id_to_name.items():
-            actual_1v1 = next((p.get("elo_rating", 1000) for p in profiles if p["id"] == p_id), 1000)
-            simul_1v1 = int(round(virtual_elo_1v1[p_id]))
-            
-            results.append({
-                "Joueur": p_name,
-                "Elo Actuel": int(actual_1v1),
-                "Simul V2 (Div=600)": simul_1v1,
-                "Différence Nette": simul_1v1 - int(actual_1v1)
-            })
-            
-        df_simul = pd.DataFrame(results)
-        df_simul = df_simul.sort_values(by="Simul V2 (Div=600)", ascending=False).reset_index(drop=True)
-        df_simul.index += 1
-        
-        status_text.empty()
-        
-        st.success("✅ Simulation V2 terminée ! Voici l'impact du diviseur 600 :")
-        st.dataframe(df_simul.head(10), use_container_width=True)
-        
-        csv = df_simul.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Télécharger le comparatif V2 (CSV)",
-            data=csv,
-            file_name='simulation_elo_v2_div600.csv',
-            mime='text/csv',
-            type="primary"
-        )
+                # 2. DISTRIBUTION PROPRE
+                count_updates = 0
+                for m_db, m_lbl in [("1v1", "Solo"), ("2v2", "Duo")]:
+                    arch_data = db.supabase.table("season_archives").select("*").eq("season_name", "Mars 2026").eq("mode", m_db).order("final_rank", desc=False).execute().data
+                    
+                    for p in arch_data:
+                        p_id = p["player_id"]
+                        f_rank = p["final_rank"]
+                        f_elo = p["final_elo"]
+                        f_matches = p.get("matches_played", 0)
+                        
+                        prof = db.supabase.table("profiles").select("unlocked_titles").eq("id", p_id).single().execute().data
+                        if not prof: continue
+                        titles = prof.get("unlocked_titles", [])
+                        if titles is None: titles = []
+                        
+                        clean_titles = [t for t in titles if not ("Mars 2026" in t and (m_lbl in t or "Solo" not in t and "Duo" not in t))]
+                        needs_update = False
+                        
+                        if f_matches > 1:
+                            r_name = "Novice"
+                            for tier in reversed(RANK_TIERS):
+                                if f_elo >= tier["threshold"]:
+                                    r_name = tier["name"]
+                                    break
+                            r_title = f"{r_name} {m_lbl} Mars 2026"
+                            if r_title not in clean_titles: clean_titles.append(r_title); needs_update = True
+                                
+                        if f_rank == 1:
+                            c_title = f"Champion {m_lbl} de Mars 2026"
+                            if c_title not in clean_titles: clean_titles.append(c_title); needs_update = True
+                        elif f_rank == 2:
+                            d_title = f"Dauphin {m_lbl} de Mars 2026"
+                            if d_title not in clean_titles: clean_titles.append(d_title); needs_update = True
+                        elif f_rank == 3:
+                            p_title = f"3ème {m_lbl} de Mars 2026"
+                            if p_title not in clean_titles: clean_titles.append(p_title); needs_update = True
+                            
+                        if needs_update or len(clean_titles) != len(titles):
+                            db.supabase.table("profiles").update({"unlocked_titles": clean_titles}).eq("id", p_id).execute()
+                            count_updates += 1
+                            
+                st.success(f"✅ Émojis supprimés et Titres propres distribués à {count_updates} joueurs !")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Erreur : {e}")
 
 elif page == "🏟️ Grand Tournoi":
     st.header("🏟️ Espace Grand Tournoi")

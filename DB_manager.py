@@ -1,5 +1,6 @@
 import streamlit as st
 from supabase import create_client
+from ranks_config import RANK_TIERS
 
 
 class DBManager:
@@ -1101,64 +1102,87 @@ class DBManager:
 
     def close_season_logic(self, season_name, mode="1v1"):
         """
-        Archive le classement actuel, distribue les titres au Top 3 
-        et applique un Soft Reset (coeff 0.4).
+        Archive le classement, distribue les titres (Champion, Dauphin, Rangs), 
+        applique le Soft Reset, remet les compteurs à zéro et étiquette les matchs.
         """
         try:
-            # 1. Récupérer le classement actuel
             res = self.get_leaderboard(mode=mode)
             players = res.data if res.data else []
-            
-            if not players:
-                return False, "Aucun joueur à archiver."
+            if not players: return False, "Aucun joueur à archiver."
 
             target_elo_col = "elo_rating" if mode == "1v1" else "elo_2v2"
-            
-            # 2. Préparer l'archivage et le reset
+            target_match_col = "matches_played" if mode == "1v1" else "matches_2v2"
             archives_to_insert = []
+            
+            # --- NOUVEAU : Détermination du label du mode ---
+            mode_label = "Solo" if mode == "1v1" else "Duo"
             
             for i, p in enumerate(players):
                 current_elo = p.get(target_elo_col, 1000)
+                matches_played = p.get(target_match_col, 0)
                 
-                # Sauvegarde pour l'archive
+                # 1. Sauvegarde dans l'archive
                 archives_to_insert.append({
                     "season_name": season_name,
                     "player_id": p["id"],
                     "username": p["username"],
                     "final_elo": int(current_elo),
+                    "matches_played": int(matches_played),
                     "final_rank": i + 1,
                     "mode": mode
                 })
                 
-                # Calcul du nouveau score (Soft Reset violent : 40% de conservation)
-                if current_elo > 1000:
-                    new_elo = 1000 + (current_elo - 1000) * 0.4
-                else:
-                    new_elo = 1000 # On remonte les gens en difficulté
+                # 2. Soft Reset
+                new_elo = 1000 + (current_elo - 1000) * 0.4 if current_elo > 1000 else 1000
                 
-                # Mise à jour du profil (Reset Elo + Reset du rang pour la zone tampon)
-                update_data = {target_elo_col: int(new_elo)}
+                # 3. Mise à jour du profil (Remise à 0 des matchs)
+                update_data = {
+                    target_elo_col: int(new_elo),
+                    target_match_col: 0
+                }
                 if mode == "1v1":
-                    update_data["current_rank_id_1v1"] = 1 # Retour Novice
+                    update_data["current_rank_id_1v1"] = 1
+                    update_data["last_seen_elo_1v1"] = int(new_elo)
                 else:
                     update_data["current_rank_id_2v2"] = 1
+                    update_data["last_seen_elo_2v2"] = int(new_elo)
                 
-                # Distribution des Titres (uniquement pour le Top 3)
-                if i < 3:
-                    titles = p.get("unlocked_titles", [])
-                    if titles is None: titles = []
-                    
-                    new_title = f"{'🏆 Champion' if i==0 else '🥈 Finaliste' if i==1 else '🥉 Podium'} {season_name}"
-                    if new_title not in titles:
-                        titles.append(new_title)
-                    update_data["unlocked_titles"] = titles
+                # 4. DISTRIBUTION DES NOUVEAUX TITRES (Sans émojis)
+                titles = p.get("unlocked_titles", [])
+                if titles is None: titles = []
+                
+                # Titre de Rang
+                if matches_played > 1:
+                    rank_name = "Novice"
+                    for tier in reversed(RANK_TIERS):
+                        if current_elo >= tier["threshold"]:
+                            rank_name = tier["name"]
+                            break
+                    rank_title = f"{rank_name} {mode_label} {season_name}"
+                    if rank_title not in titles: titles.append(rank_title)
 
+                # Titres de Podium
+                if i == 0:
+                    champ_title = f"Champion {mode_label} de {season_name}"
+                    if champ_title not in titles: titles.append(champ_title)
+                elif i == 1:
+                    dauphin_title = f"Dauphin {mode_label} de {season_name}"
+                    if dauphin_title not in titles: titles.append(dauphin_title)
+                elif i == 2:
+                    podium_title = f"3ème {mode_label} de {season_name}"
+                    if podium_title not in titles: titles.append(podium_title)
+
+                update_data["unlocked_titles"] = titles
                 self.supabase.table("profiles").update(update_data).eq("id", p["id"]).execute()
 
-            # 3. Insertion massive dans les archives
             self.supabase.table("season_archives").insert(archives_to_insert).execute()
             
-            return True, f"Saison {season_name} clôturée avec succès ({mode}) !"
+            # 5. ARCHIVAGE DES MATCHS
+            self.supabase.table("matches").update({
+                "status": "archived",
+                "season_name": season_name
+            }).eq("status", "validated").eq("mode", mode).execute()
 
+            return True, f"Saison {season_name} clôturée avec succès ({mode}) !"
         except Exception as e:
             return False, f"Erreur lors de la clôture : {str(e)}"
