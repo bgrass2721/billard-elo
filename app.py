@@ -6,6 +6,8 @@ from elo_engine import EloEngine
 import altair as alt
 from datetime import datetime
 import pytz
+from ranks_config import RANK_TIERS
+import textwrap
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
@@ -102,6 +104,151 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def render_xp_bar(old_elo, new_elo, old_rank_info, new_rank_info):
+    """Génère la carte d'XP avec le buffer de survie et remplissage dynamique post-transition."""
+    is_promo = new_rank_info["id"] > old_rank_info["id"]
+    is_demote = new_rank_info["id"] < old_rank_info["id"]
+    is_same = not (is_promo or is_demote)
+
+    # Fonction utilitaire pour calculer le % d'une barre
+    def get_pct(val, min_v, max_v):
+        if max_v <= min_v: return 100
+        return max(0, min(100, ((val - min_v) / (max_v - min_v)) * 100))
+
+    # === 1. PARAMÈTRES NOUVEAU RANG ===
+    new_base_min = new_rank_info["threshold"]
+    new_next = next((t for t in RANK_TIERS if t["id"] == new_rank_info["id"] + 1), None)
+
+    new_display_min = (new_base_min - 25) if new_base_min >= 25 else 0
+    new_display_max = new_next["threshold"] if new_next else "MAX"
+    new_calc_max = new_display_min + 100 if new_display_max == "MAX" else new_display_max
+
+    is_in_danger = new_elo < new_base_min
+
+    # === 2. PARAMÈTRES ANCIEN RANG ===
+    old_base_min = old_rank_info["threshold"]
+    old_next = next((t for t in RANK_TIERS if t["id"] == old_rank_info["id"] + 1), None)
+    
+    old_display_min = (old_base_min - 25) if old_base_min >= 25 else 0
+    old_display_max = old_next["threshold"] if old_next else "MAX"
+    old_calc_max = old_display_min + 100 if old_display_max == "MAX" else old_display_max
+
+    # === 3. CALCUL DES POURCENTAGES (Correction Téléportation) ===
+    if is_promo:
+        trans_elo = new_base_min
+        old_start_pct = get_pct(old_elo, old_display_min, old_calc_max)
+        old_end_pct = get_pct(trans_elo, old_display_min, old_calc_max)
+        # 🔴 CORRECTION : La nouvelle barre part de 0% pour montrer le remplissage du buffer
+        new_start_pct = 0 
+        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
+    elif is_demote:
+        trans_elo = old_base_min - 25
+        old_start_pct = get_pct(old_elo, old_display_min, old_calc_max)
+        old_end_pct = get_pct(trans_elo, old_display_min, old_calc_max)
+        # 🔴 CORRECTION : La nouvelle barre part de 100% et se vide
+        new_start_pct = 100 
+        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
+    else:
+        old_start_pct = get_pct(old_elo, new_display_min, new_calc_max)
+        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
+
+    diff = int(new_elo - old_elo)
+    color_pts = "#2ecc71" if diff > 0 else "#e74c3c"
+
+    # === 4. STYLES (Zone de Danger) ===
+    if is_same and is_in_danger:
+        status_text = "⚠️ ZONE DE DANGER"
+        status_color = "#ff4b2b"
+        border_color = "#ff4b2b"
+        bar_color = "linear-gradient(90deg, #ff4b2b, #ff416c)"
+        bar_shadow = "#ff4b2b"
+        anim_pulse = "animation: dangerPulse 2s infinite;"
+    else:
+        status_text = new_rank_info['name']
+        status_color = "white"
+        border_color = "rgba(198,156,37,0.3)"
+        bar_color = new_rank_info['bg_gradient']
+        bar_shadow = new_rank_info['color']
+        anim_pulse = ""
+
+    # === 5. ANIMATIONS CSS CINÉMATIQUES ===
+    if is_promo:
+        anim_css = f"@keyframes fillOld {{from {{width: {old_start_pct}%;}} to {{width: {old_end_pct}%;}}}} @keyframes fillNew {{from {{width: {new_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-phase1 {{animation: fillOld 1.5s ease-in forwards;}} .bar-phase2 {{width: {new_start_pct}%; animation: fillNew 1.5s 1.7s ease-out forwards;}}"
+        flash_anim = "flashPromo"
+    elif is_demote:
+        anim_css = f"@keyframes drainOld {{from {{width: {old_start_pct}%;}} to {{width: {old_end_pct}%;}}}} @keyframes drainNew {{from {{width: {new_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-phase1 {{animation: drainOld 1.5s ease-in forwards;}} .bar-phase2 {{width: {new_start_pct}%; animation: drainNew 1.5s 1.7s ease-out forwards;}}"
+        flash_anim = "flashDemote"
+    else:
+        anim_css = f"@keyframes moveBar {{from {{width: {old_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-single {{animation: moveBar 2s ease-out forwards;}} @keyframes dangerPulse {{ 0% {{opacity: 1;}} 50% {{opacity: 0.6;}} 100% {{opacity: 1;}} }}"
+        flash_anim = "none"
+
+    # === 6. HTML MINIFIÉ ===
+    html = f"""<style>{anim_css}
+    @keyframes fadeOut {{ 0%, 88% {{opacity:1; transform:scale(1);}} 100% {{opacity:0; transform:scale(1.3); visibility:hidden;}} }}
+    @keyframes fadeIn {{ 0%, 88% {{opacity:0; transform:scale(0.5);}} 100% {{opacity:1; transform:scale(1);}} }}
+    @keyframes flashPromo {{ 0%, 45% {{border-color: rgba(198,156,37,0.3); box-shadow: 0 0 0px transparent;}} 50% {{border-color: white; box-shadow: 0 0 50px white;}} 100% {{border-color: {new_rank_info['color']}; box-shadow: 0 10px 30px rgba(0,0,0,0.5);}} }}
+    @keyframes flashDemote {{ 0%, 45% {{border-color: rgba(198,156,37,0.3); box-shadow: 0 0 0px transparent;}} 50% {{border-color: #ff4b2b; box-shadow: 0 0 50px #ff4b2b;}} 100% {{border-color: {new_rank_info['color']}; box-shadow: 0 10px 30px rgba(0,0,0,0.5);}} }}
+    .xp-card {{width:100%; max-width:600px; margin:0 auto; font-family:'Montserrat',sans-serif; background:#0f172a; padding:40px 30px; border-radius:20px; border:2px solid {border_color}; text-align:center; color:white; overflow:hidden;}}
+    .card-anim-cinematic {{animation: {flash_anim} 3.5s forwards;}}
+    .swap-out {{animation: fadeOut 1.7s forwards;}}
+    .swap-in {{opacity:0; animation: fadeIn 1.7s forwards;}}
+    .huge-icon img, .huge-icon svg {{width:130px !important; height:130px !important; object-fit:contain;}}
+    .prog-container {{width:100%; height:18px; background:#1e293b; border-radius:9px; overflow:hidden; border:1px solid #334155; position:relative; {anim_pulse}}}
+    .bar-base {{height:100%;}}
+    </style>
+    <div class="xp-card {'card-anim-cinematic' if not is_same else ''}">
+    """
+
+    if is_same:
+        html += f"""
+        <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
+            <div class="huge-icon">{new_rank_info['icon']}</div>
+            <span style="font-weight:900; color:{status_color}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{status_text}</span>
+        </div>
+        <div class="prog-container"><div class="bar-base bar-single" style="background:{bar_color}; box-shadow:0 0 15px {bar_shadow};"></div></div>
+        <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
+            <span>{new_display_min} ELO {'(SURVIE)' if is_in_danger else ''}</span>
+            <span>{new_display_max}{' ELO' if new_display_max != 'MAX' else ''}</span>
+        </div>
+        """
+    else:
+        html += f"""
+        <div style="display: grid; grid-template-columns: 1fr;">
+            <div style="grid-row: 1; grid-column: 1; z-index: 2;" class="swap-out">
+                <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
+                    <div class="huge-icon">{old_rank_info['icon']}</div>
+                    <span style="font-weight:900; color:{'#e74c3c' if is_demote else 'white'}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{old_rank_info['name']}</span>
+                </div>
+                <div class="prog-container"><div class="bar-base bar-phase1" style="background:{old_rank_info['bg_gradient']}; box-shadow:0 0 15px {old_rank_info['color']};"></div></div>
+                <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
+                    <span>{old_display_min} ELO</span>
+                    <span>{old_display_max}{' ELO' if old_display_max != 'MAX' else ''}</span>
+                </div>
+            </div>
+            
+            <div style="grid-row: 1; grid-column: 1; z-index: 3;" class="swap-in">
+                <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
+                    <div class="huge-icon">{new_rank_info['icon']}</div>
+                    <span style="font-weight:900; color:{'#f1c40f' if is_promo else '#e74c3c'}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{'⬆️ PROMOTION !' if is_promo else '⬇️ RÉTROGRADATION...'}</span>
+                </div>
+                <div class="prog-container"><div class="bar-base bar-phase2" style="background:{new_rank_info['bg_gradient']}; box-shadow:0 0 15px {new_rank_info['color']};"></div></div>
+                <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
+                    <span>{new_display_min} ELO {'(SURVIE)' if is_in_danger else ''}</span>
+                    <span>{new_display_max}{' ELO' if new_display_max != 'MAX' else ''}</span>
+                </div>
+            </div>
+        </div>
+        """
+
+    html += f"""
+        <div style="margin-top:40px; position:relative; z-index:5;">
+            <div style="font-family:'Playfair Display',serif; font-size:3.2em; font-weight:bold;">{int(new_elo)} <span style="font-size:0.3em; color:#C69C25;">ELO</span></div>
+            <div style="color:{color_pts}; font-weight:900; font-size:1.6em; margin-top:5px;">{diff:+} PTS</div>
+        </div>
+    </div>
+    """
+    return html.replace('\n', '')
+    
 def draw_luxury_table(data_list, title=None, columns=None, is_ranking=True):
     """Génère un tableau HTML au design 'Snook'R Héraldique' avec option podium"""
     if not data_list: return ""
@@ -166,6 +313,53 @@ def draw_luxury_table(data_list, title=None, columns=None, is_ranking=True):
         html += "</tr>"
         
     html += "</tbody></table>"
+    return html
+
+
+def get_rank_info(current_elo, current_rank_id=None):
+    # (Ton code ici...)
+    strict_rank = None
+    for tier in reversed(RANK_TIERS):
+        if current_elo >= tier["threshold"]:
+            strict_rank = tier
+            break
+            
+    if current_rank_id is None:
+        return strict_rank
+
+    if strict_rank["id"] < current_rank_id:
+        current_tier = next(t for t in RANK_TIERS if t["id"] == current_rank_id)
+        if current_elo >= (current_tier["threshold"] - 25):
+            return current_tier 
+        else:
+            return strict_rank 
+    else:
+        return strict_rank 
+
+def draw_rank_badge(elo):
+    rank = get_rank_info(elo) # Cette fonction utilise RANK_TIERS
+    
+    # On récupère l'icône (qui est déjà une balise <img> complète en Base64)
+    icon_html = rank['icon']
+    
+    # On l'intègre dans un design plus grand pour le profil
+    html = f"""
+    <div style="
+        background: {rank['bg_gradient']};
+        border: 2px solid {rank['color']};
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: {rank.get('glow', '0 0 10px rgba(0,0,0,0.5)')};
+        color: white;
+    ">
+        <div style="transform: scale(2); margin-bottom: 15px;">{icon_html}</div>
+        <div style="font-family: 'Playfair Display', serif; font-size: 1.5em; font-weight: bold;">
+            {rank['name'].upper()}
+        </div>
+        <div style="font-size: 1em; opacity: 0.9;">{int(elo)} Elo</div>
+    </div>
+    """
     return html
 
 def get_badges_html(player, matches_history):
@@ -276,7 +470,7 @@ def get_badges_html(player, matches_history):
 
         badge_html = f'<div class="badge-item {css_class}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div><span class="tooltip-content">{tooltip_text}</span></div>'
         html_parts.append(badge_html)
-
+    
     def add_special(cond, shape, style, icon, name, desc, current_stat=""):
         css = "" if cond else "locked"
         stat_line = (
@@ -686,6 +880,95 @@ if current_id != "guest":
         db.supabase.table("profiles").select("*").eq("id", current_id).single().execute()
     )
     user = fresh_user.data
+
+    # --- LOGIQUE D'INTERCEPTION (EFFET WAOUH CINÉMATIQUE 1V1 ET 2V2) ---
+    if user and current_id != "guest":
+        # --- 1. INITIALISATION DES DONNÉES ---
+        last_seen_1v1 = user.get("last_seen_elo_1v1")
+        last_seen_2v2 = user.get("last_seen_elo_2v2")
+        
+        updates_init = {}
+        if last_seen_1v1 is None:
+            last_seen_1v1 = user.get("elo_rating", 1000)
+            updates_init["last_seen_elo_1v1"] = last_seen_1v1
+        if last_seen_2v2 is None:
+            last_seen_2v2 = user.get("elo_2v2", 1000)
+            updates_init["last_seen_elo_2v2"] = last_seen_2v2
+            
+        if updates_init:
+            db.supabase.table("profiles").update(updates_init).eq("id", user["id"]).execute()
+
+        # --- 2. VÉRIFICATION DU 1V1 ---
+        if user.get("elo_rating") != last_seen_1v1:
+            old_r = get_rank_info(last_seen_1v1, user.get("current_rank_id_1v1")) 
+            new_r = get_rank_info(user["elo_rating"], user.get("current_rank_id_1v1"))
+            
+            is_gain = user["elo_rating"] > last_seen_1v1
+            is_promo = new_r["id"] > old_r["id"]
+            is_demote = new_r["id"] < old_r["id"]
+
+            if is_promo:
+                st.balloons()
+                title, msg = "🚀 NOUVEAU GRADE 1V1 !", f"Incroyable ! Vous montez en grade Solo : <b>{new_r['name']}</b>"
+            elif is_demote:
+                title, msg = "📉 Rétrogradation 1v1", "Courage ! Un mauvais passage en Solo, mais vous allez remonter."
+            elif is_gain:
+                st.balloons()
+                title, msg = "🎊 Nouveaux résultats 1v1 !", "Félicitations ! Vos points Solo ont été mis à jour."
+            else:
+                title, msg = "📊 Résultats mis à jour (1v1)", "Vos derniers matchs Solo ont été enregistrés."
+
+            st.markdown(f"<h2 style='text-align: center; color: #C69C25; font-family: \"Playfair Display\";'>{title}</h2>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: center; opacity: 0.8;'>{msg}</p>", unsafe_allow_html=True)
+
+            st.markdown(render_xp_bar(last_seen_1v1, user["elo_rating"], old_r, new_r), unsafe_allow_html=True)
+
+            if st.button("Continuer", use_container_width=True, key="btn_continue_1v1"):
+                updates = {
+                    "last_seen_elo_1v1": user["elo_rating"],
+                    "current_rank_id_1v1": new_r["id"]
+                }
+                db.supabase.table("profiles").update(updates).eq("id", user["id"]).execute()
+                st.rerun()
+                
+            st.stop() # On bloque ici tant que le 1v1 n'est pas validé
+
+        # --- 3. VÉRIFICATION DU 2V2 ---
+        # Si le 1v1 est à jour (ou vient d'être validé), on vérifie le 2v2
+        elif user.get("elo_2v2") != last_seen_2v2:
+            old_r_2v2 = get_rank_info(last_seen_2v2, user.get("current_rank_id_2v2")) 
+            new_r_2v2 = get_rank_info(user["elo_2v2"], user.get("current_rank_id_2v2"))
+            
+            is_gain_2v2 = user["elo_2v2"] > last_seen_2v2
+            is_promo_2v2 = new_r_2v2["id"] > old_r_2v2["id"]
+            is_demote_2v2 = new_r_2v2["id"] < old_r_2v2["id"]
+
+            if is_promo_2v2:
+                st.balloons()
+                title, msg = "🚀 NOUVEAU GRADE 2V2 !", f"Incroyable ! Vous montez en grade Duo : <b>{new_r_2v2['name']}</b>"
+            elif is_demote_2v2:
+                title, msg = "📉 Rétrogradation 2v2", "Courage ! Un mauvais passage en Duo, mais l'équipe va se reprendre."
+            elif is_gain_2v2:
+                st.balloons()
+                title, msg = "🎊 Nouveaux résultats 2v2 !", "Félicitations ! Vos points Duo ont été mis à jour."
+            else:
+                title, msg = "📊 Résultats mis à jour (2v2)", "Vos derniers matchs Duo ont été enregistrés."
+
+            st.markdown(f"<h2 style='text-align: center; color: #4facfe; font-family: \"Playfair Display\";'>{title}</h2>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: center; opacity: 0.8;'>{msg}</p>", unsafe_allow_html=True)
+
+            # On utilise exactement la même fonction d'affichage !
+            st.markdown(render_xp_bar(last_seen_2v2, user["elo_2v2"], old_r_2v2, new_r_2v2), unsafe_allow_html=True)
+
+            if st.button("Continuer vers le club", use_container_width=True, key="btn_continue_2v2"):
+                updates_2v2 = {
+                    "last_seen_elo_2v2": user["elo_2v2"],
+                    "current_rank_id_2v2": new_r_2v2["id"]
+                }
+                db.supabase.table("profiles").update(updates_2v2).eq("id", user["id"]).execute()
+                st.rerun()
+                
+            st.stop() # On bloque ici tant que le 2v2 n'est pas validé
     st.session_state.user_data = user
 else:
     user = st.session_state.user_data
@@ -805,7 +1088,7 @@ elif page == "🏆 Classement":
     if not res.data:
         st.info("Aucun joueur n'est encore inscrit.")
     else:
-        # 3. Préparation des colonnes selon le mode
+        # 3. Préparation des données
         if mode_db == "1v1":
             target_elo = "elo_rating"
             target_matches = "matches_played"
@@ -814,46 +1097,45 @@ elif page == "🏆 Classement":
             target_matches = "matches_2v2"
 
         df = pd.DataFrame(res.data)
-
-        # --- LE FILTRE MAGIQUE ---
-        # On ne garde que les joueurs actifs (> 0 match)
-        df = df[df[target_matches] > 0]
+        df = df[df[target_matches] > 0] # Uniquement les actifs
 
         if df.empty:
-            st.info("Aucun joueur classé (0 match joué) pour le moment dans ce mode.")
+            st.info("Aucun joueur classé pour le moment dans ce mode.")
         else:
-            # --- MASQUAGE DES NOMS (PRIVACY) ---
-            # On remplace le pseudo par "Joueur Masqué" si l'option est activée
-            # et que ce n'est pas moi-même qui regarde.
+            # --- ANONYMISATION ---
             def anonymize(row):
-                # on utilise .get() pour éviter le crash si la colonne n'existe pas encore
                 if row.get("is_hidden_leaderboard", False) and row["id"] != user["id"]:
                     return "🕵️ Joueur Masqué"
                 return row["username"]
 
             df["username"] = df.apply(anonymize, axis=1)
-            # -----------------------------------
 
-            # 4. Création du tableau propre
-            display_df = df[["username", target_elo, target_matches]].copy()
-
-            # On renomme les colonnes
-            display_df.columns = ["Joueur", "Points Elo", "Matchs"]
-
-            # Reset de l'index pour avoir un classement 1, 2, 3...
-            display_df.reset_index(drop=True, inplace=True)
-            display_df.index = display_df.index + 1
-
-            # 5. Affichage avec le Tableau VIP
+            # 4. Création de la liste pour le tableau VIP
             list_data = []
-            for index, row in display_df.iterrows():
+            
+            # On trie le dataframe par Elo (au cas où la DB ne l'aurait pas fait parfaitement)
+            df = df.sort_values(by=target_elo, ascending=False).reset_index(drop=True)
+
+            for index, row in df.iterrows():
+                joueur_elo = row[target_elo]
+                
+                # Récupération des infos de rang (depuis ranks_config via app.py)
+                rank_info = get_rank_info(joueur_elo)
+                
+                # On récupère l'icône Base64 (qui contient déjà la balise <img...>)
+                icone_html = rank_info["icon"]
+
+                # 5. Construction de la ligne du tableau
                 list_data.append({
-                    "Rang": index,
-                    "Joueur": row["Joueur"],
-                    "Points Elo": f"{int(row['Points Elo'])} ⭐️",
-                    "Matchs": f"{int(row['Matchs'])} 🎮"
+                    "Rang": index + 1,
+                    # On place l'icône juste avant le nom
+                    "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{icone_html} <span>{row['username']}</span></div>",
+                    "Points Elo": f"<b>{int(joueur_elo)}</b> <span style='color: #ffd700;'>⭐️</span>",
+                    "Matchs": f"{int(row[target_matches])} 🎮"
                 })
             
+            # L'affichage final avec ta fonction de luxe
+            # Elle recevra le HTML de l'icône et l'affichera grâce à unsafe_allow_html=True
             st.markdown(draw_luxury_table(list_data), unsafe_allow_html=True)
 
 elif page == "👤 Profils Joueurs":
@@ -896,6 +1178,26 @@ elif page == "👤 Profils Joueurs":
     # ------------------------------------------
 
     st.header(f"👤 Profil de {target_user['username']}")
+
+    # --- 💎 AFFICHAGE DU RANG ET DU TITRE ---
+    target_elo = target_user.get("elo_rating", 1000)
+    
+    # 1. On affiche d'abord le Badge
+    badge_html = draw_rank_badge(target_elo)
+    st.markdown(badge_html, unsafe_allow_html=True)
+    
+    # 2. On affiche le Titre juste en dessous, sans les guillemets « »
+    equipped_title = target_user.get("equipped_title")
+    if equipped_title:
+        st.markdown(f"""
+            <div style='text-align: center; color: #C69C25; font-style: italic; font-size: 1.3em; margin-top: 10px; margin-bottom: 20px; font-family: "Playfair Display", serif; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);'>
+                {equipped_title}
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.write("<br>", unsafe_allow_html=True)
+
+    st.divider()
 
     # ==========================================
     # 🏆 VITRINE 1 : LE PANTHÉON (GRANDS TOURNOIS)
@@ -1053,38 +1355,35 @@ elif page == "👤 Profils Joueurs":
         if is_involved:
             match_counter += 1
             dt_utc = pd.to_datetime(m["created_at"])
-            dt_paris = (
-                dt_utc.tz_convert("Europe/Paris")
-                if dt_utc.tzinfo
-                else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
-            )
+            dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
             date_display = dt_paris.strftime("%d/%m %Hh%M")
 
-            is_win = (
-                m["winner_id"] == target_user["id"]
-                or m.get("winner2_id") == target_user["id"]
-            )
+            is_win = (m["winner_id"] == target_user["id"] or m.get("winner2_id") == target_user["id"])
 
             if is_win:
                 win_counter += 1
+                # On utilise le gain réel stocké
+                delta = m.get("elo_gain", 0)
             else:
                 loss_counter += 1
-
-            delta = m.get("elo_gain", 0)
-            if delta is None:
-                delta = 0
+                # --- LA CORRECTION EST ICI ---
+                # On utilise elo_loss. Si c'est un vieux match où elo_loss est vide, 
+                # on prend elo_gain par défaut pour ne pas planter.
+                delta = m.get("elo_loss")
+                if delta is None:
+                    delta = m.get("elo_gain", 0)
 
             last_score = target_elo_curve[-1]["Elo"]
+            
+            # Si victoire on AJOUTE le gain, si défaite on SOUSTRAIT la perte
             new_score = last_score + delta if is_win else last_score - delta
 
-            target_elo_curve.append(
-                {
-                    "Numéro": match_counter,
-                    "Date": date_display,
-                    "Elo": new_score,
-                    "Résultat": "Victoire" if is_win else "Défaite",
-                }
-            )
+            target_elo_curve.append({
+                "Numéro": match_counter,
+                "Date": date_display,
+                "Elo": new_score,
+                "Résultat": "Victoire" if is_win else "Défaite",
+            })
 
     # --- 4. AFFICHAGE DE LA COURBE ET DES STATS ---
     st.subheader(f"📈 Évolution {view_mode}")
@@ -1191,6 +1490,71 @@ elif page == "👤 Profils Joueurs":
         st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
 
     st.divider()
+    st.subheader("📈 Statistiques par Saison")
+
+    # --- 1. RÉCUPÉRATION DES SAISONS EXISTANTES ---
+    # On récupère les noms de saisons dans les archives (ex: "Mars 2026")
+    res_archives = db.supabase.table("season_archives").select("season_name").execute()
+    archived_names = list(set([s['season_name'] for s in res_archives.data])) if res_archives.data else []
+
+    # On prépare la saison en cours (toujours disponible)
+    now = datetime.now(pytz.timezone("Europe/Paris"))
+    month_map = {1:"Janvier", 2:"Février", 3:"Mars", 4:"Avril", 5:"Mai", 6:"Juin", 7:"Juillet", 8:"Août", 9:"Septembre", 10:"Octobre", 11:"Novembre", 12:"Décembre"}
+    current_season_name = f"{month_map[now.month]} {now.year}"
+    
+    # On fusionne le tout dans un dictionnaire structuré { Année: [Mois1, Mois2] }
+    all_seasons = archived_names + [current_season_name]
+    season_struct = {}
+    for s in all_seasons:
+        parts = s.split()
+        if len(parts) == 2:
+            m_txt, y_txt = parts[0], parts[1]
+            y_int = int(y_txt)
+            if y_int not in season_struct: season_struct[y_int] = []
+            if m_txt not in season_struct[y_int]: season_struct[y_int].append(m_txt)
+
+    # Tri des années (plus récente en premier)
+    available_years = sorted(list(season_struct.keys()), reverse=True)
+
+    # --- 2. INTERFACE DE RECHERCHE ---
+    col_search1, col_search2, col_search3 = st.columns([1, 1, 2])
+    
+    with col_search1:
+        chosen_year = st.selectbox("Année", available_years, index=0)
+        
+    with col_search2:
+        # On ne propose que les mois qui ont une saison pour l'année choisie
+        available_months = season_struct[chosen_year]
+        # On définit l'ordre chronologique pour le tri des mois
+        order = list(month_map.values())
+        available_months = sorted(available_months, key=lambda x: order.index(x))
+        
+        # On essaie de mettre le mois actuel par défaut si on est sur la bonne année
+        default_month_idx = 0
+        if chosen_year == now.year and month_map[now.month] in available_months:
+            default_month_idx = available_months.index(month_map[now.month])
+            
+        chosen_month = st.selectbox("Mois", available_months, index=default_month_idx)
+
+    with col_search3:
+        view_mode = st.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True)
+        target_mode_db = "1v1" if view_mode == "Solo (1v1)" else "2v2"
+
+    # --- 3. FILTRAGE ET CALCUL ---
+    # On transforme le mois choisi en numéro pour filtrer les matchs
+    month_inv = {v: k for k, v in month_map.items()}
+    target_month_num = month_inv[chosen_month]
+
+    raw_matches = db.supabase.table("matches").select("*").eq("status", "validated").eq("mode", target_mode_db).order("created_at", desc=False).execute().data
+    
+    df_all = pd.DataFrame(raw_matches)
+    if not df_all.empty:
+        df_all['created_at'] = pd.to_datetime(df_all['created_at']).dt.tz_convert("Europe/Paris")
+        df_filtered = df_all[(df_all['created_at'].dt.year == chosen_year) & (df_all['created_at'].dt.month == target_month_num)]
+    else:
+        df_filtered = pd.DataFrame()
+
+    # (Ici tu gardes ta boucle de calcul de courbe target_elo_curve que l'on a déjà corrigée ensemble)
     
     # --- 6. PARAMÈTRES DU COMPTE ---
     if not is_guest and target_user["id"] == user["id"]:
@@ -1993,14 +2357,17 @@ elif page == "🔧 Panel Admin":
         # C. Replay de l'histoire
         for i, m in enumerate(matches):
             mode = m.get("mode", "1v1")
-            delta = 0
+            gain = 0
+            loss = 0
 
             # --- Logique 1v1 ---
             if mode == "1v1":
                 w_id, l_id = m["winner_id"], m["loser_id"]
                 if w_id in temp_elo_1v1 and l_id in temp_elo_1v1:
-                    new_w, new_l, delta = engine.compute_new_ratings(
-                        temp_elo_1v1[w_id], temp_elo_1v1[l_id], 0, 0
+                    # ON RÉCUPÈRE LES 4 VALEURS ICI (gain ET loss)
+                    new_w, new_l, gain, loss = engine.compute_new_ratings(
+                        temp_elo_1v1[w_id], temp_elo_1v1[l_id], 
+                        matches_1v1[w_id], matches_1v1[l_id] # On passe le nombre de matchs pour le K-factor
                     )
                     temp_elo_1v1[w_id] = new_w
                     temp_elo_1v1[l_id] = new_l
@@ -2010,35 +2377,29 @@ elif page == "🔧 Panel Admin":
             # --- Logique 2v2 ---
             elif mode == "2v2":
                 ids = [m["winner_id"], m["winner2_id"], m["loser_id"], m["loser2_id"]]
-                # On vérifie que les 4 joueurs existent
                 if all(pid in temp_elo_2v2 for pid in ids if pid):
-                    w_avg = (
-                        temp_elo_2v2[m["winner_id"]] + temp_elo_2v2[m["winner2_id"]]
-                    ) / 2
-                    l_avg = (
-                        temp_elo_2v2[m["loser_id"]] + temp_elo_2v2[m["loser2_id"]]
-                    ) / 2
+                    w_avg = (temp_elo_2v2[m["winner_id"]] + temp_elo_2v2[m["winner2_id"]]) / 2
+                    l_avg = (temp_elo_2v2[m["loser_id"]] + temp_elo_2v2[m["loser2_id"]]) / 2
 
-                    _, _, delta = engine.compute_new_ratings(w_avg, l_avg, 0, 0)
+                    # ON RÉCUPÈRE LES 4 VALEURS ICI AUSSI
+                    _, _, gain, loss = engine.compute_new_ratings(w_avg, l_avg, 0, 0)
 
                     for pid in [m["winner_id"], m["winner2_id"]]:
-                        temp_elo_2v2[pid] += delta
+                        temp_elo_2v2[pid] += gain
                         matches_2v2[pid] += 1
                     for pid in [m["loser_id"], m["loser2_id"]]:
-                        temp_elo_2v2[pid] -= delta
+                        temp_elo_2v2[pid] -= loss
                         matches_2v2[pid] += 1
 
-            # D. Correction de l'historique (elo_gain)
+            # D. Correction de l'historique (elo_gain ET elo_loss)
             stored_gain = m.get("elo_gain", 0)
-            # Si le gain calculé diffère du gain stocké de plus de 0.01
-            if abs(stored_gain - delta) > 0.01:
-                db.supabase.table("matches").update({"elo_gain": delta}).eq(
-                    "id", m["id"]
-                ).execute()
+            # On vérifie si la DB doit être mise à jour
+            if abs(stored_gain - gain) > 0.01:
+                db.supabase.table("matches").update({
+                    "elo_gain": gain, 
+                    "elo_loss": loss # On en profite pour remplir la nouvelle colonne loss
+                }).eq("id", m["id"]).execute()
                 corrected_matches += 1
-
-            if total_matches > 0:
-                progress_bar.progress((i + 1) / total_matches)
 
         status_text.text("💾 Sauvegarde des scores finaux...")
 
@@ -2062,6 +2423,134 @@ elif page == "🔧 Panel Admin":
             f"✅ Synchronisation terminée ! {corrected_matches} matchs historiques corrigés."
         )
         st.balloons()
+
+    st.divider()
+    st.subheader("📅 Clôture de Saison")
+    st.info("Cette action va archiver les scores, donner les titres au Top 3 et reset les Elos de tout le monde.")
+    
+    with st.expander("🚀 Lancer la fin de saison"):
+        # --- SÉLECTEURS DE DATE POUR LE NOM DE SAISON ---
+        col_c1, col_c2 = st.columns(2)
+        
+        mois_fr = [
+            "Janvier", "Février", "Mars", "Avril", "Mai", "Juin", 
+            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+        ]
+        
+        # On récupère la date actuelle pour pré-remplir les sélecteurs
+        now = datetime.now()
+        
+        with col_c1:
+            sel_month = st.selectbox("Mois de la saison", mois_fr, index=now.month - 1)
+        with col_c2:
+            # On propose de 2025 à 2030, adaptable si besoin
+            sel_year = st.selectbox("Année", list(range(2025, 2031)), index=list(range(2025, 2031)).index(now.year))
+
+        # On construit automatiquement le nom (ex: "Avril 2026")
+        s_name = f"{sel_month} {sel_year}"
+        
+        st.write(f"Saison à clôturer : **{s_name}**")
+        
+        s_mode = st.radio("Mode à clôturer", ["Solo (1v1)", "Duo (2v2)", "Les deux"], horizontal=True)
+        
+        st.warning("⚠️ Attention : Cette action est irréversible.")
+        
+        if st.button("Confirmer la clôture et Reset les Elos", type="primary"):
+            modes_to_process = []
+            if s_mode == "Solo (1v1)": 
+                modes_to_process = ["1v1"]
+            elif s_mode == "Duo (2v2)": 
+                modes_to_process = ["2v2"]
+            else: 
+                modes_to_process = ["1v1", "2v2"]
+            
+            success_count = 0
+            for m in modes_to_process:
+                # On utilise le s_name construit proprement
+                success, msg = db.close_season_logic(s_name, mode=m)
+                if success:
+                    success_count += 1
+                    st.success(f"✅ {m} : {msg}")
+                else:
+                    st.error(f"❌ {m} : {msg}")
+            
+            if success_count > 0:
+                st.balloons()
+                st.rerun()
+
+    # --- 4. SIMULATEUR FANTÔME (TEST ELO ASYMÉTRIQUE + DIVISEUR 600) ---
+    st.subheader("👻 Simulateur Fantôme (Asymétrique + Diviseur 600)")
+    st.info("Rejoue l'historique 1v1 avec K_Victoire=50, K_Défaite=30, ET un diviseur de 600 pour mieux tolérer la variance (le facteur chance) du billard.")
+
+    if st.button("Lancer la simulation V2 (Diviseur 600) 🧪"):
+        status_text = st.empty()
+        status_text.text("⏳ Aspiration de l'historique 1v1 et tri chronologique...")
+        
+        import pandas as pd
+        
+        # 1. Récupération des données brutes (Uniquement 1v1 validés)
+        matches_res = db.supabase.table("matches").select("*").eq("status", "validated").eq("mode", "1v1").execute()
+        matches = matches_res.data if matches_res else []
+        
+        # 2. Tri chronologique strict
+        matches = sorted(matches, key=lambda x: pd.to_datetime(x["created_at"]))
+        
+        profiles_res = db.get_leaderboard(mode="1v1")
+        profiles = profiles_res.data if profiles_res else []
+        id_to_name = {p["id"]: p["username"] for p in profiles}
+        
+        # 3. Initialisation des Elos virtuels (Tout le monde part à 1000)
+        virtual_elo_1v1 = {p["id"]: 1000.0 for p in profiles}
+        
+        # 4. L'algorithme asymétrique AVEC LE NOUVEAU DIVISEUR (600)
+        def calc_asym_elo_v2(r_win, r_loss, k_win=50, k_loss=30, diviseur=600):
+            # Calcul des probabilités de victoire avec le diviseur adouci
+            exp_w = 1 / (1 + 10 ** ((r_loss - r_win) / diviseur))
+            exp_l = 1 / (1 + 10 ** ((r_win - r_loss) / diviseur))
+            
+            # Application des facteurs K
+            gain = k_win * (1 - exp_w)
+            perte = k_loss * (0 - exp_l) # Valeur négative
+            return r_win + gain, r_loss + perte
+
+        # 5. Replay de l'histoire
+        for m in matches:
+            w_id, l_id = m["winner_id"], m["loser_id"]
+            if w_id in virtual_elo_1v1 and l_id in virtual_elo_1v1:
+                new_w, new_l = calc_asym_elo_v2(virtual_elo_1v1[w_id], virtual_elo_1v1[l_id])
+                virtual_elo_1v1[w_id] = new_w
+                virtual_elo_1v1[l_id] = new_l
+
+        # 6. Tableau final
+        results = []
+        for p_id, p_name in id_to_name.items():
+            actual_1v1 = next((p.get("elo_rating", 1000) for p in profiles if p["id"] == p_id), 1000)
+            simul_1v1 = int(round(virtual_elo_1v1[p_id]))
+            
+            results.append({
+                "Joueur": p_name,
+                "Elo Actuel": int(actual_1v1),
+                "Simul V2 (Div=600)": simul_1v1,
+                "Différence Nette": simul_1v1 - int(actual_1v1)
+            })
+            
+        df_simul = pd.DataFrame(results)
+        df_simul = df_simul.sort_values(by="Simul V2 (Div=600)", ascending=False).reset_index(drop=True)
+        df_simul.index += 1
+        
+        status_text.empty()
+        
+        st.success("✅ Simulation V2 terminée ! Voici l'impact du diviseur 600 :")
+        st.dataframe(df_simul.head(10), use_container_width=True)
+        
+        csv = df_simul.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Télécharger le comparatif V2 (CSV)",
+            data=csv,
+            file_name='simulation_elo_v2_div600.csv',
+            mime='text/csv',
+            type="primary"
+        )
 
 elif page == "🏟️ Grand Tournoi":
     st.header("🏟️ Espace Grand Tournoi")
@@ -3141,39 +3630,61 @@ elif page == "🏟️ Grand Tournoi":
                 
 
 elif page == "⚙️ Paramètres":
-    st.header("⚙️ Paramètres de confidentialité")
+    st.header("⚙️ Paramètres du compte")
 
+    # --- 🏆 NOUVEAU : SECTION MON TITRE ---
+    st.subheader("🎖️ Mon Titre")
+    
+    # On récupère la liste de façon sécurisée (on gère le None)
+    unlocked = user.get("unlocked_titles", [])
+    if unlocked is None: unlocked = []
+
+    if not unlocked:
+        st.info("Vous n'avez pas encore de titre débloqué. Participez aux tournois pour en gagner !")
+    else:
+        # On prépare les options du menu déroulant
+        options_titres = ["< Aucun titre >"] + list(unlocked)
+        
+        # On cherche quel titre est actuellement équipé
+        current_t = user.get("equipped_title")
+        try:
+            default_idx = options_titres.index(current_t) if current_t in options_titres else 0
+        except:
+            default_idx = 0
+            
+        chosen_title = st.selectbox("Sélectionnez le titre à afficher sous votre pseudo :", options_titres, index=default_idx)
+        
+        if st.button("Équiper ce titre"):
+            new_val = None if chosen_title == "< Aucun titre >" else chosen_title
+            
+            # Mise à jour dans Supabase
+            try:
+                db.supabase.table("profiles").update({"equipped_title": new_val}).eq("id", user["id"]).execute()
+                # Mise à jour immédiate de la session pour l'affichage
+                st.session_state.user_data["equipped_title"] = new_val
+                st.success(f"Titre mis à jour : {chosen_title}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur lors de la mise à jour : {e}")
+
+    st.divider()
+
+    # --- 🔒 SECTION CONFIDENTIALITÉ (Ton code actuel) ---
     with st.form("privacy_form"):
         st.write("Gérez la visibilité de votre compte :")
-
-        # On récupère les valeurs actuelles (ou False par défaut)
         current_hide_lb = user.get("is_hidden_leaderboard", False)
         current_hide_prof = user.get("is_hidden_profile", False)
 
-        # Les interrupteurs
-        new_hide_lb = st.toggle(
-            "Masquer mon nom dans le classement",
-            value=current_hide_lb,
-            help="Votre nom sera remplacé par 'Joueur Masqué'.",
-        )
-        new_hide_prof = st.toggle(
-            "Rendre mon profil privé",
-            value=current_hide_prof,
-            help="Les autres joueurs ne pourront pas voir vos détails et graphiques.",
-        )
+        new_hide_lb = st.toggle("Masquer mon nom dans le classement", value=current_hide_lb)
+        new_hide_prof = st.toggle("Rendre mon profil privé", value=current_hide_prof)
 
         if st.form_submit_button("Enregistrer les modifications"):
-            success, msg = db.update_user_privacy(
-                user["id"], new_hide_lb, new_hide_prof
-            )
+            success, msg = db.update_user_privacy(user["id"], new_hide_lb, new_hide_prof)
             if success:
                 st.success("✅ " + msg)
-                # On met à jour la session pour que l'effet soit immédiat
-                user["is_hidden_leaderboard"] = new_hide_lb
-                user["is_hidden_profile"] = new_hide_prof
+                st.session_state.user_data["is_hidden_leaderboard"] = new_hide_lb
+                st.session_state.user_data["is_hidden_profile"] = new_hide_prof
                 st.rerun()
-            else:
-                st.error("❌ " + msg)
 
 elif page == "🍻 Weekly Fun":
     st.header("🍻 Les Soirées Weekly Fun")

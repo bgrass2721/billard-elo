@@ -689,19 +689,31 @@ class DBManager:
             return False, f"Erreur : {e}"
 
     def close_weekly_tournament(self, tournament_id, rankings):
-        """
-        Clôture le tournoi hebdomadaire et enregistre le classement final.
-        'rankings' est un dictionnaire de type {user_id: rang_final}
-        """
+        """Clôture le tournoi hebdomadaire, enregistre les rangs et donne le titre au gagnant."""
         try:
-            # 1. On met à jour le rang de chaque participant
+            # 1. On récupère le nom du tournoi pour le titre
+            t_res = self.supabase.table("weekly_tournaments").select("name").eq("id", tournament_id).single().execute()
+            t_name = t_res.data["name"] if t_res.data else "Weekly Fun"
+
+            # 2. On met à jour chaque participant
             for u_id, rank in rankings.items():
                 self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", u_id).execute()
+                
+                # --- TITRE POUR LE GAGNANT ---
+                if int(rank) == 1:
+                    p_res = self.supabase.table("profiles").select("unlocked_titles").eq("id", u_id).single().execute()
+                    titles = p_res.data.get("unlocked_titles", []) if p_res.data else []
+                    if titles is None: titles = []
+                    
+                    new_title = f"🥇 Gagnant Weekly : {t_name}"
+                    if new_title not in titles:
+                        titles.append(new_title)
+                        self.supabase.table("profiles").update({"unlocked_titles": titles}).eq("id", u_id).execute()
             
-            # 2. On change le statut du tournoi pour l'archiver
+            # 3. On change le statut du tournoi
             self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
             
-            return True, "Tournoi clôturé avec succès ! Les badges sont distribués."
+            return True, "Tournoi clôturé et titre distribué au vainqueur !"
         except Exception as e:
             return False, f"Erreur lors de la clôture : {e}"
 
@@ -878,9 +890,29 @@ class DBManager:
                         elif r_num == max_lb_r - 7: final_ranks[l_id] = 25 # Top 25
                         # Et ainsi de suite selon la taille du tournoi...
 
-            # 3. Enregistrement en base de données
+           # 3. Enregistrement en base de données + Distribution des Titres
             for uid, rank in final_ranks.items():
+                # On met à jour le rang dans la table des participants
                 self.supabase.table("gt_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
+                
+                # --- DISTRIBUTION DES TITRES (Top 3) ---
+                if rank in [1, 2, 3]:
+                    # On récupère le profil pour avoir ses titres actuels
+                    p_res = self.supabase.table("profiles").select("unlocked_titles").eq("id", uid).single().execute()
+                    titles = p_res.data.get("unlocked_titles", []) if p_res.data else []
+                    if titles is None: titles = []
+                    
+                    # On définit le nom du titre selon la place
+                    t_data = self.supabase.table("grand_tournaments").select("name").eq("id", tournament_id).single().execute().data
+                    t_name = t_data["name"] if t_data else "Grand Tournoi"
+                    
+                    emoji = "🏆" if rank == 1 else "🥈" if rank == 2 else "🥉"
+                    statut = "Vainqueur" if rank == 1 else "Finaliste" if rank == 2 else "Podium"
+                    new_title = f"{emoji} {statut} {t_name}"
+                    
+                    if new_title not in titles:
+                        titles.append(new_title)
+                        self.supabase.table("profiles").update({"unlocked_titles": titles}).eq("id", uid).execute()
 
             # 4. On passe le tournoi en "completed"
             self.supabase.table("grand_tournaments").update({"status": "completed"}).eq("id", tournament_id).execute()
@@ -1065,3 +1097,68 @@ class DBManager:
             return res.data if res.data else []
         except Exception as e:
             return []
+
+
+    def close_season_logic(self, season_name, mode="1v1"):
+        """
+        Archive le classement actuel, distribue les titres au Top 3 
+        et applique un Soft Reset (coeff 0.4).
+        """
+        try:
+            # 1. Récupérer le classement actuel
+            res = self.get_leaderboard(mode=mode)
+            players = res.data if res.data else []
+            
+            if not players:
+                return False, "Aucun joueur à archiver."
+
+            target_elo_col = "elo_rating" if mode == "1v1" else "elo_2v2"
+            
+            # 2. Préparer l'archivage et le reset
+            archives_to_insert = []
+            
+            for i, p in enumerate(players):
+                current_elo = p.get(target_elo_col, 1000)
+                
+                # Sauvegarde pour l'archive
+                archives_to_insert.append({
+                    "season_name": season_name,
+                    "player_id": p["id"],
+                    "username": p["username"],
+                    "final_elo": int(current_elo),
+                    "final_rank": i + 1,
+                    "mode": mode
+                })
+                
+                # Calcul du nouveau score (Soft Reset violent : 40% de conservation)
+                if current_elo > 1000:
+                    new_elo = 1000 + (current_elo - 1000) * 0.4
+                else:
+                    new_elo = 1000 # On remonte les gens en difficulté
+                
+                # Mise à jour du profil (Reset Elo + Reset du rang pour la zone tampon)
+                update_data = {target_elo_col: int(new_elo)}
+                if mode == "1v1":
+                    update_data["current_rank_id_1v1"] = 1 # Retour Novice
+                else:
+                    update_data["current_rank_id_2v2"] = 1
+                
+                # Distribution des Titres (uniquement pour le Top 3)
+                if i < 3:
+                    titles = p.get("unlocked_titles", [])
+                    if titles is None: titles = []
+                    
+                    new_title = f"{'🏆 Champion' if i==0 else '🥈 Finaliste' if i==1 else '🥉 Podium'} {season_name}"
+                    if new_title not in titles:
+                        titles.append(new_title)
+                    update_data["unlocked_titles"] = titles
+
+                self.supabase.table("profiles").update(update_data).eq("id", p["id"]).execute()
+
+            # 3. Insertion massive dans les archives
+            self.supabase.table("season_archives").insert(archives_to_insert).execute()
+            
+            return True, f"Saison {season_name} clôturée avec succès ({mode}) !"
+
+        except Exception as e:
+            return False, f"Erreur lors de la clôture : {str(e)}"

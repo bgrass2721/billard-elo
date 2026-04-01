@@ -1,33 +1,24 @@
 class EloEngine:
     def __init__(self, initial_elo=1000):
         self.initial_elo = initial_elo
+        
+        # --- PARAMÈTRES V3 (Asymétrique + Diviseur 600) ---
+        self.k_win = 50       
+        self.k_loss = 30      
+        self.diviseur = 600   
 
-    def get_k_factor(self, matches_played):
-        """
-        Détermine le facteur K uniquement selon l'expérience du joueur.
-        """
-        return 40
-        """
-        if matches_played <= 10:
-            return 40
-        elif matches_played <= 30:
-            return 20
-        else:
-            return 10
-        """
+    def compute_new_ratings(self, winner_elo, loser_elo, winner_matches=0, loser_matches=0):
+        # Probabilités de victoire
+        exp_winner = 1 / (1 + 10 ** ((loser_elo - winner_elo) / self.diviseur))
+        exp_loser = 1 / (1 + 10 ** ((winner_elo - loser_elo) / self.diviseur))
 
-    def compute_new_ratings(self, winner_elo, loser_elo, winner_matches, loser_matches):
-        # Probabilité de victoire du gagnant
-        expected_win = 1 / (1 + 10 ** ((loser_elo - winner_elo) / 400))
+        # Calcul des gains et pertes asymétriques
+        gain = round(self.k_win * (1 - exp_winner))
+        perte = round(self.k_loss * (0 - exp_loser)) # Valeur négative
 
-        # On calcule le delta en utilisant le K du gagnant
-        # (ou une moyenne des deux K pour être plus juste)
-        k_winner = self.get_k_factor(winner_matches)
+        # Application des scores
+        new_winner_elo = winner_elo + gain
+        new_loser_elo = loser_elo + perte 
 
-        delta = round(k_winner * (1 - expected_win))
-
-        # On s'assure que le perdant ne perd pas plus que ce que le gagnant gagne
-        new_winner_elo = winner_elo + delta
-        new_loser_elo = loser_elo - delta
-
-        return new_winner_elo, new_loser_elo, delta
+        # On retourne 4 valeurs : Nouveaux Elos, le Gain (positif), et la Perte (en valeur absolue)
+        return new_winner_elo, new_loser_elo, gain, abs(perte)
