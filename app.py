@@ -2517,19 +2517,64 @@ elif page == "🔧 Panel Admin":
 
     st.divider()
 
-    # --- 3. SYNCHRONISATION TOTALE (CORRIGÉE) ---
-    st.subheader("🔄 Synchronisation Totale")
+    st.divider()
+
+    # --- 3. SYNCHRONISATION DE LA SAISON EN COURS ---
+    st.subheader("🔄 Réparation de la Saison")
     st.info(
-        "Recalcule tous les scores depuis le début et met à jour l'historique des gains. "
-        "Utile pour corriger les écarts entre le profil et le classement."
+        "Recalcule tous les scores de la **saison en cours**. "
+        "Le système récupère l'Elo de fin de saison dernière, applique le soft-reset, "
+        "puis rejoue tous les matchs actuels dans l'ordre."
     )
 
-    if st.button("Lancer la réparation (Reset & Replay) ⚠️"):
+    if st.button("🔧 Réparer la saison en cours", type="primary"):
         status_text = st.empty()
         status_text.text("⏳ Démarrage du recalcul...")
         progress_bar = st.progress(0)
 
-        # A. Récupération Chronologique
+        # A. Récupération des archives pour trouver l'Elo de départ de CETTE saison
+        archives = db.supabase.table("season_archives").select("*").order("created_at", desc=True).execute().data
+        
+        latest_archive_1v1 = {}
+        latest_archive_2v2 = {}
+        
+        if archives:
+            for arc in archives:
+                pid = arc["player_id"]
+                mode = arc.get("mode", "1v1")
+                # Comme on a trié par date décroissante, la première ligne trouvée est la plus récente
+                if mode == "1v1" and pid not in latest_archive_1v1:
+                    latest_archive_1v1[pid] = arc["final_elo"]
+                elif mode == "2v2" and pid not in latest_archive_2v2:
+                    latest_archive_2v2[pid] = arc["final_elo"]
+
+        # Fonction miroir du soft-reset (1000 + 40% au-delà de 1000)
+        def get_start_elo(last_final_elo):
+            if last_final_elo > 1000:
+                return 1000 + (last_final_elo - 1000) * 0.4
+            return 1000
+
+        # B. Initialisation des compteurs avec les Elos de départ
+        players = db.get_leaderboard().data
+
+        temp_elo_1v1 = {}
+        matches_1v1 = {}
+        temp_elo_2v2 = {}
+        matches_2v2 = {}
+
+        for p in players:
+            pid = p["id"]
+            # Initialisation 1v1
+            base_1v1 = latest_archive_1v1.get(pid, 1000)
+            temp_elo_1v1[pid] = get_start_elo(base_1v1)
+            matches_1v1[pid] = 0  # On remet le compteur de matchs de la saison à 0
+
+            # Initialisation 2v2
+            base_2v2 = latest_archive_2v2.get(pid, 1000)
+            temp_elo_2v2[pid] = get_start_elo(base_2v2)
+            matches_2v2[pid] = 0
+
+        # C. Récupération Chronologique UNIQUEMENT de la saison en cours (status = validated)
         matches = (
             db.supabase.table("matches")
             .select("*")
@@ -2539,21 +2584,11 @@ elif page == "🔧 Panel Admin":
             .data
         )
 
-        # B. Initialisation des compteurs virtuels
-        players = db.get_leaderboard().data
-
-        # On sépare 1v1 et 2v2
-        temp_elo_1v1 = {p["id"]: 1000 for p in players}
-        matches_1v1 = {p["id"]: 0 for p in players}
-
-        temp_elo_2v2 = {p["id"]: 1000 for p in players}
-        matches_2v2 = {p["id"]: 0 for p in players}
-
         engine = EloEngine()
         total_matches = len(matches)
         corrected_matches = 0
 
-        # C. Replay de l'histoire
+        # D. Replay de l'histoire de la saison
         for i, m in enumerate(matches):
             mode = m.get("mode", "1v1")
             gain = 0
@@ -2563,10 +2598,9 @@ elif page == "🔧 Panel Admin":
             if mode == "1v1":
                 w_id, l_id = m["winner_id"], m["loser_id"]
                 if w_id in temp_elo_1v1 and l_id in temp_elo_1v1:
-                    # ON RÉCUPÈRE LES 4 VALEURS ICI (gain ET loss)
                     new_w, new_l, gain, loss = engine.compute_new_ratings(
                         temp_elo_1v1[w_id], temp_elo_1v1[l_id], 
-                        matches_1v1[w_id], matches_1v1[l_id] # On passe le nombre de matchs pour le K-factor
+                        matches_1v1[w_id], matches_1v1[l_id]
                     )
                     temp_elo_1v1[w_id] = new_w
                     temp_elo_1v1[l_id] = new_l
@@ -2580,7 +2614,6 @@ elif page == "🔧 Panel Admin":
                     w_avg = (temp_elo_2v2[m["winner_id"]] + temp_elo_2v2[m["winner2_id"]]) / 2
                     l_avg = (temp_elo_2v2[m["loser_id"]] + temp_elo_2v2[m["loser2_id"]]) / 2
 
-                    # ON RÉCUPÈRE LES 4 VALEURS ICI AUSSI
                     _, _, gain, loss = engine.compute_new_ratings(w_avg, l_avg, 0, 0)
 
                     for pid in [m["winner_id"], m["winner2_id"]]:
@@ -2590,13 +2623,12 @@ elif page == "🔧 Panel Admin":
                         temp_elo_2v2[pid] -= loss
                         matches_2v2[pid] += 1
 
-            # D. Correction de l'historique (elo_gain ET elo_loss)
+            # Correction de l'historique dans la BDD (si le K-factor avait déraillé)
             stored_gain = m.get("elo_gain", 0)
-            # On vérifie si la DB doit être mise à jour
             if abs(stored_gain - gain) > 0.01:
                 db.supabase.table("matches").update({
                     "elo_gain": gain, 
-                    "elo_loss": loss # On en profite pour remplir la nouvelle colonne loss
+                    "elo_loss": loss
                 }).eq("id", m["id"]).execute()
                 corrected_matches += 1
 
@@ -2618,8 +2650,9 @@ elif page == "🔧 Panel Admin":
                 db.supabase.table("profiles").update(updates).eq("id", p_id).execute()
 
         progress_bar.empty()
+        status_text.empty()
         st.success(
-            f"✅ Synchronisation terminée ! {corrected_matches} matchs historiques corrigés."
+            f"✅ Réparation terminée ! La saison en cours a été recalculée depuis le soft-reset. ({corrected_matches} matchs ajustés)."
         )
         st.balloons()
 
