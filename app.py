@@ -2640,10 +2640,12 @@ elif page == "🔧 Panel Admin":
         for p_id in all_ids:
             updates = {}
             if p_id in temp_elo_1v1:
-                updates["elo_rating"] = temp_elo_1v1[p_id]
+                # 🔴 CORRECTION : On force le format Entier (Integer)
+                updates["elo_rating"] = int(round(temp_elo_1v1[p_id]))
                 updates["matches_played"] = matches_1v1[p_id]
             if p_id in temp_elo_2v2:
-                updates["elo_2v2"] = temp_elo_2v2[p_id]
+                # 🔴 CORRECTION : On force le format Entier (Integer)
+                updates["elo_2v2"] = int(round(temp_elo_2v2[p_id]))
                 updates["matches_2v2"] = matches_2v2[p_id]
 
             if updates:
