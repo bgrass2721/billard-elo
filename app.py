@@ -674,6 +674,51 @@ cookie_manager = stx.CookieManager()
 if "logout_clicked" not in st.session_state:
     st.session_state.logout_clicked = False
 
+# ==========================================
+# 🚨 INTERCEPTION DU LIEN "MOT DE PASSE OUBLIÉ"
+# ==========================================
+query_params = st.query_params
+if "code" in query_params:
+    reset_code = query_params["code"]
+    try:
+        # On dit à Supabase : "Voici le code de l'email, connecte-moi temporairement"
+        db.supabase.auth.exchange_code_for_session(reset_code)
+        # On active l'affichage du formulaire de nouveau mot de passe
+        st.session_state.show_reset_form = True
+        # On nettoie l'URL pour éviter que l'appli ne boucle dessus au prochain rafraîchissement
+        st.query_params.clear()
+        st.rerun()
+    except Exception as e:
+        st.error("Le lien de récupération est invalide ou a expiré.")
+        st.query_params.clear()
+
+# Si l'utilisateur vient de cliquer sur le lien, on affiche UNIQUEMENT ce formulaire
+if st.session_state.get("show_reset_form"):
+    st.markdown("<h2 style='text-align: center; color: #C69C25;'>🔒 Réinitialisation du mot de passe</h2>", unsafe_allow_html=True)
+    
+    with st.form("new_password_form"):
+        st.info("Vous êtes authentifié temporairement. Veuillez choisir un nouveau mot de passe.")
+        new_pwd = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password")
+        new_pwd_confirm = st.text_input("Confirmez le nouveau mot de passe", type="password")
+        
+        if st.form_submit_button("Enregistrer le nouveau mot de passe", type="primary"):
+            if len(new_pwd) < 6:
+                st.error("Le mot de passe doit contenir au moins 6 caractères.")
+            elif new_pwd != new_pwd_confirm:
+                st.error("Les mots de passe ne correspondent pas.")
+            else:
+                success, msg = db.update_password(new_pwd)
+                if success:
+                    st.success("✅ Mot de passe mis à jour avec succès ! Vous allez être redirigé...")
+                    st.session_state.show_reset_form = False
+                    st.rerun()
+                else:
+                    st.error(msg)
+    
+    # On bloque tout le reste de l'application tant qu'il n'a pas changé son mot de passe
+    st.stop()
+# ==========================================
+
 # --- STYLE CSS ---
 st.markdown(
     """
