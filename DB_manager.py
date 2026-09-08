@@ -37,6 +37,18 @@ class DBManager:
         except Exception as e:
             return False, f"Erreur lors de l'envoi : {e}"
 
+    def verify_reset_code(self, email, code):
+        """Vérifie le code OTP à 6 chiffres et connecte l'utilisateur temporairement"""
+        try:
+            self.supabase.auth.verify_otp({
+                "email": email,
+                "token": code,
+                "type": "recovery"
+            })
+            return True, "Code valide."
+        except Exception as e:
+            return False, f"Code invalide ou expiré : {e}"
+
     def update_password(self, new_password):
         """Met à jour le mot de passe de l'utilisateur actuellement connecté."""
         try:

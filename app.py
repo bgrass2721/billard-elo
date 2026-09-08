@@ -674,51 +674,6 @@ cookie_manager = stx.CookieManager()
 if "logout_clicked" not in st.session_state:
     st.session_state.logout_clicked = False
 
-# ==========================================
-# 🚨 INTERCEPTION DU LIEN "MOT DE PASSE OUBLIÉ"
-# ==========================================
-query_params = st.query_params
-if "code" in query_params:
-    reset_code = query_params["code"]
-    try:
-        # On dit à Supabase : "Voici le code de l'email, connecte-moi temporairement"
-        db.supabase.auth.exchange_code_for_session(reset_code)
-        # On active l'affichage du formulaire de nouveau mot de passe
-        st.session_state.show_reset_form = True
-        # On nettoie l'URL pour éviter que l'appli ne boucle dessus au prochain rafraîchissement
-        st.query_params.clear()
-        st.rerun()
-    except Exception as e:
-        st.error("Le lien de récupération est invalide ou a expiré.")
-        st.query_params.clear()
-
-# Si l'utilisateur vient de cliquer sur le lien, on affiche UNIQUEMENT ce formulaire
-if st.session_state.get("show_reset_form"):
-    st.markdown("<h2 style='text-align: center; color: #C69C25;'>🔒 Réinitialisation du mot de passe</h2>", unsafe_allow_html=True)
-    
-    with st.form("new_password_form"):
-        st.info("Vous êtes authentifié temporairement. Veuillez choisir un nouveau mot de passe.")
-        new_pwd = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password")
-        new_pwd_confirm = st.text_input("Confirmez le nouveau mot de passe", type="password")
-        
-        if st.form_submit_button("Enregistrer le nouveau mot de passe", type="primary"):
-            if len(new_pwd) < 6:
-                st.error("Le mot de passe doit contenir au moins 6 caractères.")
-            elif new_pwd != new_pwd_confirm:
-                st.error("Les mots de passe ne correspondent pas.")
-            else:
-                success, msg = db.update_password(new_pwd)
-                if success:
-                    st.success("✅ Mot de passe mis à jour avec succès ! Vous allez être redirigé...")
-                    st.session_state.show_reset_form = False
-                    st.rerun()
-                else:
-                    st.error(msg)
-    
-    # On bloque tout le reste de l'application tant qu'il n'a pas changé son mot de passe
-    st.stop()
-# ==========================================
-
 # --- STYLE CSS ---
 st.markdown(
     """
@@ -975,7 +930,7 @@ if st.session_state.user_data is None:
                     st.success("Connexion réussie !")
                     st.rerun()
                     
-        # --- NOUVEAU : BOUTON VISITEUR ---
+        # BOUTON VISITEUR ---
         st.write("---")
         if st.button("👁️ Entrer sans compte (Mode Visiteur)"):
             # On crée un "faux" profil directement dans la mémoire
@@ -989,20 +944,56 @@ if st.session_state.user_data is None:
 
         st.write("---")
         
-        # --- NOUVEAU : MOT DE PASSE OUBLIÉ ---
+        # MOT DE PASSE OUBLIÉ (MÉTHODE PAR CODE) ---
         with st.expander("Mot de passe oublié ?"):
-            st.info("Entrez votre email. Nous vous enverrons un lien pour vous connecter et changer votre mot de passe.")
+            st.info("Entrez votre email. Vous recevrez un code à 6 chiffres pour changer votre mot de passe.")
+            
+            # Étape 1 : Saisie de l'email
             reset_email = st.text_input("Votre adresse email", key="reset_email_input")
             
-            if st.button("Envoyer le lien de récupération", type="secondary"):
+            if st.button("Envoyer le code", type="secondary"):
                 if not reset_email:
                     st.warning("Veuillez entrer une adresse email.")
                 else:
                     success, msg = db.send_password_reset(reset_email)
                     if success:
-                        st.success("📧 Email envoyé ! Vérifiez vos spams. Cliquez sur le lien dans l'email pour revenir ici.")
+                        st.session_state.reset_in_progress = True
+                        st.session_state.reset_email_target = reset_email
+                        st.success("📧 Email envoyé ! Vérifiez vos spams et revenez ici pour entrer le code.")
+                        st.rerun()
                     else:
                         st.error(msg)
+            
+            # Étape 2 : Saisie du code et du nouveau mot de passe
+            if st.session_state.get("reset_in_progress"):
+                st.divider()
+                st.markdown(f"Veuillez entrer le code reçu sur **{st.session_state.reset_email_target}**")
+                
+                reset_code = st.text_input("Code à 6 chiffres reçu par e-mail", max_chars=6)
+                new_pwd = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password", key="new_pwd_reset")
+                new_pwd_confirm = st.text_input("Confirmez le nouveau mot de passe", type="password", key="new_pwd_confirm_reset")
+                
+                if st.button("Valider et changer le mot de passe", type="primary"):
+                    if len(reset_code) != 6:
+                        st.error("Le code doit faire exactement 6 chiffres.")
+                    elif len(new_pwd) < 6:
+                        st.error("Le mot de passe doit faire au moins 6 caractères.")
+                    elif new_pwd != new_pwd_confirm:
+                        st.error("Les mots de passe ne correspondent pas.")
+                    else:
+                        # 1. Vérification du code
+                        success_otp, msg_otp = db.verify_reset_code(st.session_state.reset_email_target, reset_code)
+                        if success_otp:
+                            # 2. Mise à jour du MDP
+                            success_pwd, msg_pwd = db.update_password(new_pwd)
+                            if success_pwd:
+                                st.success("✅ Mot de passe changé avec succès ! Vous pouvez maintenant vous connecter normalement en haut.")
+                                st.session_state.reset_in_progress = False
+                                st.balloons()
+                            else:
+                                st.error(msg_pwd)
+                        else:
+                            st.error("❌ Code incorrect ou expiré.")
 
     with tab2:
         st.info("⚠️ Un code d'invitation est requis pour s'inscrire.")
