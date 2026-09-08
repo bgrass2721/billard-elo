@@ -944,9 +944,9 @@ if st.session_state.user_data is None:
 
         st.write("---")
         
-        # MOT DE PASSE OUBLIÉ (MÉTHODE PAR CODE) ---
+        # --- MOT DE PASSE OUBLIÉ (MÉTHODE PAR CODE) ---
         with st.expander("Mot de passe oublié ?"):
-            st.info("Entrez votre email. Vous recevrez un code à 6 chiffres pour changer votre mot de passe.")
+            st.info("Entrez votre email. Vous recevrez un code à 8 caractères pour changer votre mot de passe.")
             
             # Étape 1 : Saisie de l'email
             reset_email = st.text_input("Votre adresse email", key="reset_email_input")
@@ -969,13 +969,15 @@ if st.session_state.user_data is None:
                 st.divider()
                 st.markdown(f"Veuillez entrer le code reçu sur **{st.session_state.reset_email_target}**")
                 
-                reset_code = st.text_input("Code à 6 chiffres reçu par e-mail", max_chars=6)
+                # Modification ici : max_chars passe à 8
+                reset_code = st.text_input("Code à 8 caractères reçu par e-mail", max_chars=8)
                 new_pwd = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password", key="new_pwd_reset")
                 new_pwd_confirm = st.text_input("Confirmez le nouveau mot de passe", type="password", key="new_pwd_confirm_reset")
                 
                 if st.button("Valider et changer le mot de passe", type="primary"):
-                    if len(reset_code) != 6:
-                        st.error("Le code doit faire exactement 6 chiffres.")
+                    # Modification ici : on vérifie que la longueur est bien de 8
+                    if len(reset_code) != 8:
+                        st.error("Le code doit faire exactement 8 caractères.")
                     elif len(new_pwd) < 6:
                         st.error("Le mot de passe doit faire au moins 6 caractères.")
                     elif new_pwd != new_pwd_confirm:
