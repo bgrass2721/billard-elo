@@ -1845,14 +1845,36 @@ elif page == "🎯 Déclarer un match":
         # 1. Choix du mode de jeu
         mode_input = st.radio("Type de match", ["👤 1 vs 1", "👥 2 vs 2"], horizontal=True)
 
-        # Récupération de la liste des joueurs (sauf moi-même)
+        # 2. NOUVEAU : Le bouton magique (Toggle) pour débloquer tous les joueurs
+        show_all_players = st.toggle("🔍 Afficher également les joueurs inactifs (Nouveaux et Anciens)")
+
+        # Récupération de la liste des joueurs
         players_res = db.get_leaderboard()
-        # On gère le cas où la liste est vide ou None
         all_players = players_res.data if players_res.data else []
-        adv_map = {p["username"]: p["id"] for p in all_players if p["id"] != user["id"]}
+        
+        adv_map = {}
+        
+        for p in all_players:
+            if p["id"] == user["id"]:
+                continue # On s'ignore soi-même
+            
+            # On vérifie l'activité selon le mode
+            if mode_input == "👤 1 vs 1":
+                is_active = p.get("matches_played", 0) > 0
+            else:
+                is_active = p.get("matches_2v2", 0) > 0
+            
+            # On ajoute le joueur au dictionnaire s'il est actif, OU si le bouton est coché
+            if is_active or show_all_players:
+                # Petit plus visuel : On ajoute le mot "(Inactif)" si le joueur n'a pas encore joué
+                label = p["username"] if is_active else f"{p['username']} (Inactif)"
+                adv_map[label] = p["id"]
+
+        # Tri de la liste par ordre alphabétique pour s'y retrouver facilement
+        adv_map = dict(sorted(adv_map.items()))
 
         if not adv_map:
-            st.warning("Il n'y a pas assez de joueurs inscrits pour déclarer un match.")
+            st.warning("Il n'y a pas encore de joueurs actifs. Cochez le bouton ci-dessus pour afficher tout le monde !")
         else:
             with st.form("match_form"):
                 # --- INTERFACE 1 vs 1 ---
