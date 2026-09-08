@@ -337,8 +337,8 @@ def get_rank_info(current_elo, current_rank_id=None):
     else:
         return strict_rank 
 
-def draw_rank_badge(elo):
-    rank = get_rank_info(elo) # Cette fonction utilise RANK_TIERS
+def draw_rank_badge(elo, current_rank_id=None):
+    rank = get_rank_info(elo, current_rank_id) # On passe l'ID actuel pour activer le bouclier !
     
     # On récupère l'icône (qui est déjà une balise <img> complète en Base64)
     icon_html = rank['icon']
@@ -1249,9 +1249,11 @@ elif page == "🏆 Classement":
             if mode_db == "1v1":
                 target_elo = "elo_rating"
                 target_matches = "matches_played"
+                target_rank_col = "current_rank_id_1v1" 
             else:
                 target_elo = "elo_2v2"
                 target_matches = "matches_2v2"
+                target_rank_col = "current_rank_id_2v2" 
 
             df = pd.DataFrame(res.data)
             df = df[df[target_matches] > 0] # Uniquement les actifs
@@ -1275,7 +1277,10 @@ elif page == "🏆 Classement":
 
                 for index, row in df.iterrows():
                     joueur_elo = row[target_elo]
-                    rank_info = get_rank_info(joueur_elo)
+                    joueur_rank_id = row.get(target_rank_col) # NOUVEAU : On récupère l'ID
+                    
+                    # On passe les deux infos pour que le bouclier fonctionne !
+                    rank_info = get_rank_info(joueur_elo, joueur_rank_id) 
                     icone_html = rank_info["icon"]
 
                     list_data.append({
@@ -1385,7 +1390,7 @@ elif page == "👤 Profils Joueurs":
     target_elo = target_user.get("elo_rating", 1000)
     
     # 1. On affiche d'abord le Badge
-    badge_html = draw_rank_badge(target_elo)
+    badge_html = draw_rank_badge(target_elo, target_rank_id)
     st.markdown(badge_html, unsafe_allow_html=True)
     
     # 2. On affiche le Titre juste en dessous - Version Emblème de Rang
