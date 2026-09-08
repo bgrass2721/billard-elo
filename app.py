@@ -1320,34 +1320,38 @@ elif page == "🏆 Classement":
             else:
                 list_arch = []
                 
-                # Boucle sécurisée qui s'adapte au nom exact de tes colonnes d'archives
-                for index, row in enumerate(archive_data):
-                    # Cherche la valeur Elo sous différents noms possibles
-                    score_elo = row.get("final_elo", row.get("elo", row.get("elo_rating", 1000)))
-                    
-                    # Cherche le nombre de matchs
+                # 1. On filtre d'abord pour garder uniquement ceux qui ont un match ou plus
+                active_archive_data = []
+                for row in archive_data:
                     nb_matchs = row.get("matches_played", row.get("final_matches", 0))
+                    if int(nb_matchs) > 0:
+                        active_archive_data.append(row)
+
+                if not active_archive_data:
+                    st.info(f"Aucun joueur actif trouvé pour **{selected_season}** en **{arch_mode}**.")
+                else:
+                    # 2. On trie les joueurs actifs par Elo décroissant pour être sûr de l'ordre
+                    active_archive_data = sorted(
+                        active_archive_data, 
+                        key=lambda x: float(x.get("final_elo", x.get("elo", x.get("elo_rating", 1000)))), 
+                        reverse=True
+                    )
+
+                    # 3. On construit la liste avec des rangs propres et continus (1, 2, 3...)
+                    for index, row in enumerate(active_archive_data):
+                        score_elo = row.get("final_elo", row.get("elo", row.get("elo_rating", 1000)))
+                        nb_matchs = row.get("matches_played", row.get("final_matches", 0))
+                        
+                        rank_info = get_rank_info(score_elo)
+                        
+                        list_arch.append({
+                            "Rang": index + 1, # <--- Attribue un numéro propre qui se suit (1, 2, 3...)
+                            "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{rank_info['icon']} <span>{row.get('username', 'Inconnu')}</span></div>",
+                            "Points Elo": f"<b>{int(score_elo)}</b> <span style='color: #a0aec0;'>pts</span>",
+                            "Matchs Joués": f"{int(nb_matchs)} 🎮"
+                        })
                     
-                    # 🔴 NOUVEAU FILTRE ICI : On ignore les joueurs avec 0 match
-                    if int(nb_matchs) == 0:
-                        continue
-                    
-                    # Cherche le rang final
-                    final_rank = row.get("final_rank", index + 1)
-                    
-                    rank_info = get_rank_info(score_elo)
-                    
-                    list_arch.append({
-                        "Rang": final_rank,
-                        "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{rank_info['icon']} <span>{row.get('username', 'Inconnu')}</span></div>",
-                        "Points Elo": f"<b>{int(score_elo)}</b> <span style='color: #a0aec0;'>pts</span>",
-                        "Matchs Joués": f"{int(nb_matchs)} 🎮"
-                    })
-                
-                # Tri de sécurité en Python au cas où le tri Supabase aurait échoué
-                list_arch = sorted(list_arch, key=lambda x: int(x["Rang"]))
-                
-                st.markdown(draw_luxury_table(list_arch, title=f"Classement Final - {selected_season}"), unsafe_allow_html=True)
+                    st.markdown(draw_luxury_table(list_arch, title=f"Classement Final - {selected_season}"), unsafe_allow_html=True)
                 
 elif page == "👤 Profils Joueurs":
     # --- 0. SÉLECTION DU JOUEUR ---
