@@ -1328,6 +1328,10 @@ elif page == "🏆 Classement":
                     # Cherche le nombre de matchs
                     nb_matchs = row.get("matches_played", row.get("final_matches", 0))
                     
+                    # 🔴 NOUVEAU FILTRE ICI : On ignore les joueurs avec 0 match
+                    if int(nb_matchs) == 0:
+                        continue
+                    
                     # Cherche le rang final
                     final_rank = row.get("final_rank", index + 1)
                     
