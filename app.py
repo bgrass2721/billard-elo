@@ -1388,6 +1388,7 @@ elif page == "👤 Profils Joueurs":
 
     # --- 💎 AFFICHAGE DU RANG ET DU TITRE ---
     target_elo = target_user.get("elo_rating", 1000)
+    target_rank_id = target_user.get("current_rank_id_1v1")
     
     # 1. On affiche d'abord le Badge
     badge_html = draw_rank_badge(target_elo, target_rank_id)
