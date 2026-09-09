@@ -1280,7 +1280,7 @@ class DBManager:
                 self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
                 
             # 6. Clôturer officiellement
-            self.supabase.table("weekly_tournaments").update({"status": "archived"}).eq("id", tournament_id).execute()
+            self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
             
             return True, "🏁 Tournoi clôturé ! Les rangs et ex-aequo ont été attribués automatiquement."
         except Exception as e:
@@ -1292,25 +1292,37 @@ class DBManager:
         return res.data
 
     def start_weekly_tournament(self, tournament_id, t_type):
-        """Clôture les inscriptions et génère l'arbre ou le scoreboard"""
+        """Clôture les inscriptions et génère le tournoi Weekly (Avec tirage Humain pour l'arbre)"""
         import random
-        import math
         try:
-            # 1. On passe le tournoi en mode "En direct"
+            # 1. On verrouille les inscriptions
             self.supabase.table("weekly_tournaments").update({"status": "in_progress"}).eq("id", tournament_id).execute()
 
-            # 2. Si c'est un arbre, on fait le tirage au sort automatique !
+            # 2. Logique d'appariement pour le mode Arbre
             if t_type == "bracket":
                 parts = self.supabase.table("weekly_participants").select("user_id").eq("tournament_id", tournament_id).eq("is_active", True).execute().data
-                uids = [p["user_id"] for p in parts][:16] # On limite à 16 joueurs
-                random.shuffle(uids) # 🎲 Tirage au sort aléatoire complet !
+                uids = [p["user_id"] for p in parts]
+                random.shuffle(uids) # Mélange total des inscrits
 
-                # S'il y a moins de 16 joueurs, on comble avec des "Vides" (Byes)
-                while len(uids) < 16:
-                    uids.append(None)
+                # Préparation des 8 matchs du Tour 1
+                match_slots = [{"player1_id": None, "player2_id": None} for _ in range(8)]
+
+                # ÉTAPE CLÉ : Répartition façon "Tirage au chapeau"
+                # On mélange l'ordre des matchs pour que la place dans l'arbre soit imprévisible
+                match_indices = list(range(8))
+                random.shuffle(match_indices)
+
+                # On distribue les joueurs 1 par 1 dans les matchs disponibles
+                for idx, player_id in enumerate(uids):
+                    target_match = match_indices[idx % 8]
+                    
+                    if match_slots[target_match]["player1_id"] is None:
+                        match_slots[target_match]["player1_id"] = player_id
+                    else:
+                        match_slots[target_match]["player2_id"] = player_id
 
                 bracket_data = []
-                # Création des 4 tours (R1=8 matchs, R2=4, R3=2, R4=1)
+                # Création des 4 tours
                 for r in range(1, 5):
                     nb_matches = 16 // (2**r)
                     for m in range(1, nb_matches + 1):
@@ -1320,32 +1332,33 @@ class DBManager:
                             "status": "pending"
                         }
                         
-                        # Si c'est le Tour 1, on place les joueurs tirés au sort
                         if r == 1:
-                            p1 = uids[(m-1)*2]
-                            p2 = uids[(m-1)*2+1]
+                            p1 = match_slots[m-1]["player1_id"]
+                            p2 = match_slots[m-1]["player2_id"]
                             match["player1_id"] = p1
                             match["player2_id"] = p2
                             
-                            # MAGIE DES BYES : Si un joueur n'a pas d'adversaire, il gagne d'office !
+                            # MAGIE DES BYES : Résolution immédiate des matchs Joueur vs Fantôme
                             if p1 and not p2:
                                 match["winner_id"] = p1
+                                match["score1"] = 1
+                                match["score2"] = 0
                                 match["status"] = "completed"
                             elif p2 and not p1:
                                 match["winner_id"] = p2
+                                match["score1"] = 0
+                                match["score2"] = 1
                                 match["status"] = "completed"
                             elif not p1 and not p2:
-                                match["status"] = "completed"
+                                match["status"] = "completed" # Ne se produit que s'il y a moins de 8 joueurs au total
                         
                         bracket_data.append(match)
                 
-                # On insère tout l'arbre en base de données
+                # Injection en base et propagation des qualifiés au Tour 2
                 self.supabase.table("weekly_matches").insert(bracket_data).execute()
-                
-                # On fait avancer automatiquement les joueurs qui ont eu un "Bye" au Tour 2
                 self._propagate_weekly_byes(tournament_id)
 
-            return True, "Le tournoi est lancé ! Les inscriptions sont closes."
+            return True, "Le tournoi est lancé ! Bonne chance à tous."
         except Exception as e:
             return False, f"Erreur lors du lancement : {e}"
 
