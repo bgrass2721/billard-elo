@@ -1292,37 +1292,28 @@ class DBManager:
         return res.data
 
     def start_weekly_tournament(self, tournament_id, t_type):
-        """Clôture les inscriptions et génère le tournoi Weekly (Avec tirage Humain pour l'arbre)"""
+        """Clôture les inscriptions et génère le tournoi avec tirage Humain et cascade de fantômes"""
         import random
         try:
-            # 1. On verrouille les inscriptions
             self.supabase.table("weekly_tournaments").update({"status": "in_progress"}).eq("id", tournament_id).execute()
 
-            # 2. Logique d'appariement pour le mode Arbre
             if t_type == "bracket":
                 parts = self.supabase.table("weekly_participants").select("user_id").eq("tournament_id", tournament_id).eq("is_active", True).execute().data
                 uids = [p["user_id"] for p in parts]
-                random.shuffle(uids) # Mélange total des inscrits
+                random.shuffle(uids)
 
-                # Préparation des 8 matchs du Tour 1
                 match_slots = [{"player1_id": None, "player2_id": None} for _ in range(8)]
-
-                # ÉTAPE CLÉ : Répartition façon "Tirage au chapeau"
-                # On mélange l'ordre des matchs pour que la place dans l'arbre soit imprévisible
                 match_indices = list(range(8))
                 random.shuffle(match_indices)
 
-                # On distribue les joueurs 1 par 1 dans les matchs disponibles
                 for idx, player_id in enumerate(uids):
                     target_match = match_indices[idx % 8]
-                    
                     if match_slots[target_match]["player1_id"] is None:
                         match_slots[target_match]["player1_id"] = player_id
                     else:
                         match_slots[target_match]["player2_id"] = player_id
 
                 bracket_data = []
-                # Création des 4 tours
                 for r in range(1, 5):
                     nb_matches = 16 // (2**r)
                     for m in range(1, nb_matches + 1):
@@ -1338,7 +1329,6 @@ class DBManager:
                             match["player1_id"] = p1
                             match["player2_id"] = p2
                             
-                            # MAGIE DES BYES : Résolution immédiate des matchs Joueur vs Fantôme
                             if p1 and not p2:
                                 match["winner_id"] = p1
                                 match["score1"] = 1
@@ -1350,70 +1340,79 @@ class DBManager:
                                 match["score2"] = 1
                                 match["status"] = "completed"
                             elif not p1 and not p2:
-                                match["status"] = "completed" # Ne se produit que s'il y a moins de 8 joueurs au total
+                                match["status"] = "completed" # Fantôme vs Fantôme
                         
                         bracket_data.append(match)
                 
-                # Injection en base et propagation des qualifiés au Tour 2
                 self.supabase.table("weekly_matches").insert(bracket_data).execute()
                 self._propagate_weekly_byes(tournament_id)
 
-            return True, "Le tournoi est lancé ! Bonne chance à tous."
+            return True, "Le tournoi est lancé avec succès !"
         except Exception as e:
-            return False, f"Erreur lors du lancement : {e}"
+            return False, f"Erreur : {e}"
 
     def _propagate_weekly_byes(self, tournament_id):
-        """Pousse automatiquement les vainqueurs par forfait (Byes) au tour suivant"""
+        """Pousse les vainqueurs par forfait et résout les matchs Fantôme vs Fantôme en cascade"""
         import math
-        matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute().data
-        m_dict = {m["bracket_match_id"]: m for m in matches}
-        
-        for r in range(1, 4):
-            nb_matches = 16 // (2**r)
-            for m in range(1, nb_matches + 1):
-                curr = m_dict.get(f"WB_R{r}_M{m}")
-                if curr and curr["status"] == "completed" and curr.get("winner_id"):
-                    next_r = r + 1
-                    next_m = math.ceil(m / 2)
-                    is_p1 = (m % 2 != 0)
-                    
-                    next_match_id = f"WB_R{next_r}_M{next_m}"
-                    next_match = self.supabase.table("weekly_matches").select("id").eq("tournament_id", tournament_id).eq("bracket_match_id", next_match_id).execute().data
-                    
-                    if next_match:
-                        col = "player1_id" if is_p1 else "player2_id"
-                        self.supabase.table("weekly_matches").update({col: curr["winner_id"]}).eq("id", next_match[0]["id"]).execute()
+        # 4 passes pour garantir que la cascade remonte jusqu'à la finale
+        for _ in range(4):
+            matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute().data
+            if not matches: return
+            m_dict = {m["bracket_match_id"]: m for m in matches}
+            
+            for r in range(1, 5):
+                nb_matches = 16 // (2**r)
+                for m in range(1, nb_matches + 1):
+                    curr = m_dict.get(f"WB_R{r}_M{m}")
+                    if not curr: continue
+
+                    # 1. Résolution intelligente si les deux parents sont terminés
+                    if curr["status"] == "pending" and r > 1:
+                        p1_match = m_dict.get(f"WB_R{r-1}_M{(m*2)-1}")
+                        p2_match = m_dict.get(f"WB_R{r-1}_M{m*2}")
+                        
+                        if p1_match and p2_match and p1_match["status"] == "completed" and p2_match["status"] == "completed":
+                            p1_w = p1_match.get("winner_id")
+                            p2_w = p2_match.get("winner_id")
+                            updates = {"player1_id": p1_w, "player2_id": p2_w}
+                            
+                            if p1_w and not p2_w:
+                                updates["winner_id"] = p1_w
+                                updates["score1"] = 1
+                                updates["score2"] = 0
+                                updates["status"] = "completed"
+                            elif p2_w and not p1_w:
+                                updates["winner_id"] = p2_w
+                                updates["score1"] = 0
+                                updates["score2"] = 1
+                                updates["status"] = "completed"
+                            elif not p1_w and not p2_w:
+                                updates["status"] = "completed"
+                                
+                            if any(curr.get(k) != v for k, v in updates.items()):
+                                self.supabase.table("weekly_matches").update(updates).eq("id", curr["id"]).execute()
+                                curr.update(updates)
+                                
+                    # 2. Push direct au tour suivant classique
+                    if r < 4 and curr["status"] == "completed" and curr.get("winner_id"):
+                        next_r, next_m = r + 1, math.ceil(m / 2)
+                        next_match = m_dict.get(f"WB_R{next_r}_M{next_m}")
+                        
+                        if next_match and next_match["status"] == "pending":
+                            col = "player1_id" if (m % 2 != 0) else "player2_id"
+                            if next_match.get(col) != curr["winner_id"]:
+                                self.supabase.table("weekly_matches").update({col: curr["winner_id"]}).eq("id", next_match["id"]).execute()
 
     def update_weekly_bracket_score(self, match_id, score1, score2, p1_id, p2_id, tournament_id, bracket_match_id):
-        """Enregistre le score et fait passer le vainqueur au tour suivant"""
-        import math
+        """Met à jour un match et relance immédiatement la cascade pour vérifier si le vainqueur gagne d'office au tour d'après"""
         try:
             winner_id = p1_id if score1 > score2 else p2_id
-            
-            # 1. Mettre à jour le match actuel
             self.supabase.table("weekly_matches").update({
-                "score1": score1,
-                "score2": score2,
-                "winner_id": winner_id,
-                "status": "completed"
+                "score1": score1, "score2": score2, "winner_id": winner_id, "status": "completed"
             }).eq("id", match_id).execute()
             
-            # 2. Envoyer le vainqueur au tour suivant
-            parts = bracket_match_id.split('_')
-            r_num = int(parts[1][1:])
-            m_num = int(parts[2][1:])
-            
-            if r_num < 4: # Si ce n'est pas la finale
-                next_r = r_num + 1
-                next_m = math.ceil(m_num / 2)
-                is_p1 = (m_num % 2 != 0)
-                next_match_id = f"WB_R{next_r}_M{next_m}"
-                
-                next_match = self.supabase.table("weekly_matches").select("id").eq("tournament_id", tournament_id).eq("bracket_match_id", next_match_id).execute().data
-                if next_match:
-                    col = "player1_id" if is_p1 else "player2_id"
-                    self.supabase.table("weekly_matches").update({col: winner_id}).eq("id", next_match[0]["id"]).execute()
-                    
+            # On relance l'auto-résolution après chaque validation de l'admin !
+            self._propagate_weekly_byes(tournament_id)
             return True, "Match mis à jour !"
         except Exception as e:
             return False, str(e)

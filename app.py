@@ -4285,8 +4285,16 @@ elif page == "🍻 Weekly Fun":
                                 p1_raw = m.get("player1_id")
                                 p2_raw = m.get("player2_id")
                                 
-                                p1 = all_users.get(p1_raw, "Fantôme / BYE") if p1_raw else "Fantôme / BYE"
-                                p2 = all_users.get(p2_raw, "Fantôme / BYE") if p2_raw else "Fantôme / BYE"
+                                # 🔴 AFFICHAGE INTELLIGENT : Fantôme ou En Attente ?
+                                if p1_raw:
+                                    p1 = all_users.get(p1_raw, "Fantôme / BYE")
+                                else:
+                                    p1 = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
+                                    
+                                if p2_raw:
+                                    p2 = all_users.get(p2_raw, "Fantôme / BYE")
+                                else:
+                                    p2 = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
                                 
                                 s1, s2 = m.get("score1", 0), m.get("score2", 0)
                                 
@@ -4298,12 +4306,14 @@ elif page == "🍻 Weekly Fun":
                                 else:
                                     w1 = w2 = "normal; color: white;"
                                     c1_score = c2_score = "transparent"
-                                    if p1 == "Fantôme / BYE" and p2 == "Fantôme / BYE": s1 = s2 = ""
+                                    if p1 in ["Fantôme / BYE", "En attente..."] and p2 in ["Fantôme / BYE", "En attente..."]: 
+                                        s1 = s2 = ""
                                 
                                 c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
                                 c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
                             else:
-                                c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>Fantôme / BYE</span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>Fantôme / BYE</span></div>"
+                                lbl = "Fantôme / BYE" if r_num == 1 else "En attente..."
+                                c_html += f"<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>{lbl}</span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>{lbl}</span></div>"
                             
                             c_html += "</div>"
                             return c_html
@@ -4335,8 +4345,18 @@ elif page == "🍻 Weekly Fun":
                                 if m:
                                     p1_raw = m.get("player1_id")
                                     p2_raw = m.get("player2_id")
-                                    p1_name = all_users.get(p1_raw, "Fantôme / BYE") if p1_raw else "Fantôme / BYE"
-                                    p2_name = all_users.get(p2_raw, "Fantôme / BYE") if p2_raw else "Fantôme / BYE"
+                                    
+                                    # 🔴 AFFICHAGE INTELLIGENT (ADMIN)
+                                    if p1_raw:
+                                        p1_name = all_users.get(p1_raw, "Fantôme / BYE")
+                                    else:
+                                        p1_name = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
+                                        
+                                    if p2_raw:
+                                        p2_name = all_users.get(p2_raw, "Fantôme / BYE")
+                                    else:
+                                        p2_name = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
+                                        
                                     is_done = m["status"] == "completed"
                                     
                                     st.write(f"**{p1_name}**")
@@ -4355,7 +4375,10 @@ elif page == "🍻 Weekly Fun":
                                                 db.update_weekly_bracket_score(m["id"], s1, s2, p1_raw, p2_raw, current_weekly['id'], m["bracket_match_id"])
                                                 st.rerun()
                                     else:
-                                        st.caption("Qualifié d'office (BYE)")
+                                        if m["status"] == "completed":
+                                            st.caption("Qualifié d'office (BYE)")
+                                        else:
+                                            st.caption("En attente des résultats...")
 
                         for r_num in range(1, total_rounds_wb + 1):
                             st.markdown(f"##### Tour {r_num}")
