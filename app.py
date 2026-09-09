@@ -3994,217 +3994,412 @@ elif page == "⚙️ Paramètres":
 elif page == "🍻 Weekly Fun":
     st.header("🍻 Les Soirées Weekly Fun")
     
-    # Vérification du statut Admin avec ta vraie colonne
     is_guest = st.session_state.get("guest_mode", False)
     is_admin = not is_guest and user.get("is_admin", False)
+    all_users = {p["id"]: p["username"] for p in db.get_all_profiles().data}
 
     # ==========================================
-    # 🛠️ VUE ADMIN : CRÉATION & GESTION
+    # 🛠️ VUE ADMIN : CRÉATION DU TOURNOI
     # ==========================================
     if is_admin:
-        with st.expander("🛠️ Zone Admin : Créer un nouveau Weekly Fun"):
+        with st.expander("🛠️ Créer un nouveau Weekly Fun"):
             st.info("Créer un nouveau tournoi placera automatiquement le précédent dans les archives.")
-            
             with st.form("form_create_weekly"):
-                w_name = st.text_input("Nom du tournoi", placeholder="Ex: Tournoi Main Gauche, Le Défi du Mercredi...")
-                w_desc = st.text_area("Description / Règles spéciales", placeholder="Ex: Ce soir, la casse est obligatoire par la bande...")
+                w_name = st.text_input("Nom de l'événement", placeholder="Ex: Le Défi du Mercredi...")
+                w_desc = st.text_area("Règles spéciales", placeholder="Ex: Casse obligatoire par la bande...")
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    w_max_players = st.number_input("Nombre de places maximum", min_value=4, max_value=64, value=16, step=1)
-                with col2:
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    w_type = st.selectbox("Mode de jeu", ["🎯 Par Coup (Scoreboard Infini)", "🌳 Arbre Classique (Max 16)"])
+                with c2:
+                    w_max_players = st.number_input("Places max", min_value=4, max_value=64, value=16, step=1)
+                with c3:
                     import datetime
-                    w_date = st.date_input("Date de l'événement", value=datetime.date.today())
-                    
-                submitted_weekly = st.form_submit_button("Publier le tournoi 🚀")
+                    w_date = st.date_input("Date", value=datetime.date.today())
                 
-                if submitted_weekly:
+                if st.form_submit_button("Publier l'événement 🚀"):
                     if not w_name:
-                        st.error("⚠️ Le nom du tournoi est obligatoire.")
+                        st.error("⚠️ Le nom est obligatoire.")
                     else:
-                        success, msg = db.create_weekly_tournament(w_name, w_desc, w_max_players, w_date)
+                        db_type = "par_coup" if "Par Coup" in w_type else "bracket"
+                        success, msg = db.create_weekly_tournament(w_name, w_desc, w_max_players, w_date, tournament_type=db_type)
                         if success:
                             st.success(msg)
                             st.rerun()
                         else:
                             st.error(msg)
-                            
         st.divider()
 
     # ==========================================
-    # 📺 VUE SPECTATEUR / JOUEUR : LE TOURNOI EN COURS
+    # 📺 VUE PRINCIPALE : LE TOURNOI ACTUEL
     # ==========================================
-    
-    # On récupère le tournoi actif
     current_weekly = db.get_current_weekly_tournament()
     
     if not current_weekly:
-        st.info("🛌 Aucun tournoi Weekly Fun n'est prévu pour le moment. L'admin prépare sûrement le prochain !")
+        st.info("🛌 Aucun tournoi Weekly Fun n'est prévu pour le moment.")
     else:
-        # Formatage propre de la date et gestion de la description
+        t_type = current_weekly.get("tournament_type", "legacy")
+        t_status = current_weekly.get("status", "open")
         formatted_date = pd.to_datetime(current_weekly['event_date']).strftime('%d/%m/%Y')
-        description_text = current_weekly.get('description', '')
-        if not description_text:
-            description_text = "Aucune règle spéciale pour ce tournoi."
-
-        # Affiche la bannière du tournoi avec le design Premium Snook'R
+        mode_label = "🎯 MODE PAR COUP" if t_type == "par_coup" else "🌳 MODE ARBRE (16 Joueurs)"
+        
+        # BANNIÈRE COMMUNE
         st.markdown(
             f"""
-<div style='background: linear-gradient(145deg, #0f172a, #1e293b); padding: 25px; border-radius: 12px; border: 1px solid #C69C25; border-left: 8px solid #C69C25; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 25px;'>
-    <h2 style='margin-top: 0; margin-bottom: 15px; color: #C69C25; font-family: "Playfair Display", serif; font-size: 28px; font-weight: bold; letter-spacing: 0.5px;'>
-        🏆 {current_weekly['name']}
-    </h2>
-    <div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>
-        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
-            📅 Date : <span style='color: #ffffff; font-weight: bold;'>{formatted_date}</span>
-        </div>
-        <div style='background-color: rgba(198,156,37,0.1); padding: 8px 15px; border-radius: 8px; color: #e0e0e0; font-weight: 500; font-size: 15px; border: 1px solid rgba(198,156,37,0.2);'>
-            🎟️ Places : <span style='color: #ffffff; font-weight: bold;'>{current_weekly['max_players']} max</span>
-        </div>
-    </div>
-    <div style='color: #cccccc; font-size: 16px; line-height: 1.5; border-top: 1px dashed rgba(198,156,37,0.3); padding-top: 15px;'>
-        <i>{description_text}</i>
-    </div>
-</div>
-            """, 
-            unsafe_allow_html=True
+            <div style='background: linear-gradient(145deg, #0f172a, #1e293b); padding: 25px; border-radius: 12px; border: 1px solid #C69C25; border-left: 8px solid #C69C25; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 25px;'>
+                <div style='display: flex; justify-content: space-between;'>
+                    <div style='color: #C69C25; font-size: 0.85em; font-weight: bold; letter-spacing: 2px;'>{mode_label}</div>
+                    <div style='color: {"#2ecc71" if t_status == "open" else "#e74c3c"}; font-size: 0.85em; font-weight: bold;'>
+                        {"🟢 INSCRIPTIONS OUVERTES" if t_status == "open" else "🔥 TOURNOI EN DIRECT"}
+                    </div>
+                </div>
+                <h2 style='margin-top: 10px; margin-bottom: 15px; color: white; font-family: "Playfair Display", serif; font-size: 28px; font-weight: bold;'>
+                    {current_weekly['name']}
+                </h2>
+                <div style='color: #cccccc; font-size: 16px; border-top: 1px dashed rgba(198,156,37,0.3); padding-top: 15px;'>
+                    <i>{current_weekly.get('description', 'Aucune règle spéciale.')}</i>
+                </div>
+            </div>
+            """, unsafe_allow_html=True
         )
-        
-        # --- 👥 SYSTÈME D'INSCRIPTION ET LISTE D'ATTENTE ---
-        st.subheader("👥 Joueurs Inscrits")
-        
-        # 1. On récupère tous les joueurs inscrits à ce tournoi
+
         participants = db.get_weekly_participants(current_weekly['id'])
         max_p = current_weekly['max_players']
+        is_registered = not is_guest and any(p['user_id'] == user['id'] for p in participants)
 
-        # --- 🛠️ MODÉRATION ADMIN (AJOUTER / SUPPRIMER) ---
-        if is_admin:
-            with st.expander("🛠️ Modération de la liste"):
-                col_add, col_rem = st.columns(2)
-                
-                with col_add:
-                    st.write("**Ajouter un joueur (Forcer)**")
-                    # On récupère tous les profils pour le menu déroulant
-                    all_p_res = db.get_leaderboard()
-                    if all_p_res.data:
-                        player_names = [p['username'] for p in all_p_res.data]
-                        target_name = st.selectbox("Sélectionner un joueur", player_names, key="admin_add_select")
-                        if st.button("Ajouter manuellement"):
-                            # On trouve l'ID correspondant au nom
-                            target_id = next(p['id'] for p in all_p_res.data if p['username'] == target_name)
-                            db.register_weekly(current_weekly['id'], target_id)
-                            st.success(f"Ajout de {target_name} réussi !")
-                            st.rerun()
-                
-                with col_rem:
-                    st.write("**Retirer un joueur**")
-                    if not participants:
-                        st.write("Aucun joueur à retirer.")
-                    else:
-                        # On liste les gens actuellement dans le tournoi
-                        current_p_names = [p.get('profiles', {}).get('username', 'Inconnu') for p in participants]
-                        rem_name = st.selectbox("Joueur à expulser", current_p_names, key="admin_rem_select")
-                        if st.button("Expulser du tournoi", type="secondary"):
-                            # On trouve l'ID correspondant
-                            rem_id = next(p['user_id'] for p in participants if p.get('profiles', {}).get('username') == rem_name)
-                            db.admin_remove_participant(current_weekly['id'], rem_id)
-                            st.warning(f"{rem_name} a été retiré.")
-                            st.rerun()
-        
-        # 2. Le script coupe la liste en deux selon la limite de places
-        main_list = participants[:max_p]
-        wait_list = participants[max_p:]
-        
-        # 3. Est-ce que le joueur qui regarde la page est dedans ?
-        is_registered = False
-        if not is_guest:
-            is_registered = any(p['user_id'] == user['id'] for p in participants)
-        
-        # 4. Le bouton d'action magique
-        col_btn, _ = st.columns([1, 2])
-        with col_btn:
-            if is_guest:
-                st.info("🔒 Connectez-vous pour vous inscrire.")
-            else:
-                if is_registered:
+        # ---------------------------------------------------------
+        # PHASE 1 : INSCRIPTIONS OUVERTES (Status = 'open')
+        # ---------------------------------------------------------
+        if t_status == "open":
+            st.subheader("👥 Inscriptions en cours")
+            
+            # --- Modération Admin (Ajouter / Expulser pendant les inscriptions) ---
+            if is_admin:
+                with st.expander("🛠️ Modération de la liste des inscrits"):
+                    col_add, col_rem = st.columns(2)
+                    with col_add:
+                        st.write("**Ajouter un joueur (Forcer)**")
+                        all_p_res = db.get_leaderboard().data
+                        if all_p_res:
+                            p_names = [p['username'] for p in all_p_res if p['id'] not in [x['user_id'] for x in participants]]
+                            t_add = st.selectbox("Sélectionner un joueur", ["-- Choisir --"] + p_names, key="admin_add_open")
+                            if st.button("Ajouter manuellement") and t_add != "-- Choisir --":
+                                target_id = next(p['id'] for p in all_p_res if p['username'] == t_add)
+                                db.register_weekly(current_weekly['id'], target_id)
+                                st.success(f"Ajout de {t_add} réussi !")
+                                st.rerun()
+                    with col_rem:
+                        st.write("**Retirer un joueur**")
+                        if not participants:
+                            st.write("Aucun joueur inscrit.")
+                        else:
+                            c_names = [p.get('profiles', {}).get('username', 'Inconnu') for p in participants]
+                            t_rem = st.selectbox("Joueur à expulser", ["-- Choisir --"] + c_names, key="admin_rem_open")
+                            if st.button("Expulser du tournoi", type="secondary") and t_rem != "-- Choisir --":
+                                rem_id = next(p['user_id'] for p in participants if p.get('profiles', {}).get('username') == t_rem)
+                                db.admin_remove_participant(current_weekly['id'], rem_id)
+                                st.warning(f"{t_rem} a été retiré.")
+                                st.rerun()
+
+            # --- Inscription classique ---
+            col_btn, _ = st.columns([1, 2])
+            with col_btn:
+                if is_guest:
+                    st.info("🔒 Connectez-vous pour vous inscrire.")
+                elif is_registered:
                     if st.button("❌ Se désinscrire", type="secondary", use_container_width=True):
                         db.unregister_weekly(current_weekly['id'], user['id'])
                         st.rerun()
                 else:
-                    # Le texte du bouton s'adapte s'il n'y a plus de place
                     btn_text = "✅ S'inscrire" if len(participants) < max_p else "⏳ Rejoindre la file d'attente"
                     if st.button(btn_text, type="primary", use_container_width=True):
                         db.register_weekly(current_weekly['id'], user['id'])
                         st.rerun()
 
-        st.write("") # Petit espace
-        
-        # 5. Affichage propre des deux listes
-        col_main, col_wait = st.columns(2)
-        
-        with col_main:
-            st.markdown(f"#### 📋 Liste Principale ({len(main_list)}/{max_p})")
-            if not main_list:
-                st.write("Aucun inscrit pour le moment.")
-            else:
-                for i, p in enumerate(main_list):
-                    # On affiche le joueur en gras si c'est "nous"
-                    username = p.get('profiles', {}).get('username', 'Inconnu')
-                    if not is_guest and p['user_id'] == user['id']:
-                        st.markdown(f"**{i+1}. {username} (Vous)**", help="Vous êtes qualifié d'office !")
-                    else:
-                        st.markdown(f"{i+1}. {username}")
-                        
-        with col_wait:
-            st.markdown(f"#### ⏳ Liste d'Attente ({len(wait_list)})")
-            if not wait_list:
-                st.caption("Personne en attente.")
-            else:
-                for i, p in enumerate(wait_list):
-                    username = p.get('profiles', {}).get('username', 'Inconnu')
-                    if not is_guest and p['user_id'] == user['id']:
-                        st.markdown(f"**{max_p + i + 1}. {username} (Vous)**", help="Si quelqu'un se désiste, vous montez !")
-                    else:
-                        st.caption(f"{max_p + i + 1}. {username}")
+            # --- Listes ---
+            col_main, col_wait = st.columns(2)
+            with col_main:
+                st.markdown(f"#### 📋 Liste Principale ({min(len(participants), max_p)}/{max_p})")
+                for i, p in enumerate(participants[:max_p]):
+                    uname = p.get('profiles', {}).get('username', 'Inconnu')
+                    st.write(f"**{i+1}. {uname} (Vous)**" if (not is_guest and p['user_id'] == user['id']) else f"{i+1}. {uname}")
+            with col_wait:
+                st.markdown(f"#### ⏳ File d'attente ({max(0, len(participants) - max_p)})")
+                for i, p in enumerate(participants[max_p:]):
+                    uname = p.get('profiles', {}).get('username', 'Inconnu')
+                    st.caption(f"{max_p + i + 1}. {uname}")
 
-        # ==========================================
-        # 👑 PANNEAU DE CONTRÔLE ADMIN (Tournoi Actif)
-        # ==========================================
-        if is_admin:
-            st.divider()
-            st.subheader("👑 Panneau de Clôture (Admin)")
+            # --- DÉMARRAGE ADMIN ---
+            if is_admin:
+                st.divider()
+                st.markdown("### 🏁 Démarrer l'événement")
+                st.warning("Attention : Clôturer les inscriptions va figer la liste et lancer l'affichage en direct !")
+                if st.button("🔴 CLÔTURER LES INSCRIPTIONS ET LANCER LE TOURNOI", type="primary", use_container_width=True):
+                    db.start_weekly_tournament(current_weekly['id'], t_type)
+                    st.rerun()
+
+        # ---------------------------------------------------------
+        # PHASE 2 : LE TOURNOI EN DIRECT (Status = 'in_progress')
+        # ---------------------------------------------------------
+        elif t_status == "in_progress":
             
-            if not participants:
-                st.info("Impossible de clôturer un tournoi sans participants.")
-            else:
-                with st.expander("🏆 Saisir le classement final et clôturer", expanded=False):
-                    st.warning("⚠️ Attention : Une fois clôturé, le tournoi sera archivé et les badges seront distribués. Cette action est définitive.")
+            # --- MODE : PAR COUP ---
+            if t_type == "par_coup":
+                current_shot = current_weekly.get("current_shot", 1)
+                st.markdown("### 📊 Scoreboard en direct")
+                
+                scores_data = db.get_weekly_scores(current_weekly['id'])
+                
+                # 1. Calcul des totaux et tri du meilleur au moins bon (on ignore les -1 non joués)
+                player_totals = {p["user_id"]: 0 for p in participants}
+                for s in scores_data:
+                    if s["user_id"] in player_totals and not s["is_absent"] and s["score"] >= 0:
+                        player_totals[s["user_id"]] += s["score"]
+
+                sorted_participants = sorted(
+                    participants, 
+                    key=lambda p: player_totals.get(p["user_id"], 0), 
+                    reverse=True
+                )
+
+                player_names = {}
+                player_ranks = {}
+                current_rank = 1
+                for i, p in enumerate(sorted_participants):
+                    uid = p["user_id"]
+                    uname = p.get("profiles", {}).get("username", "Inconnu")
                     
-                    with st.form("form_close_weekly"):
-                        st.write("Indiquez la position finale de chaque joueur (1 pour le vainqueur, 2, 3, etc.) :")
+                    if i > 0 and player_totals[uid] == player_totals[sorted_participants[i-1]["user_id"]]:
+                        rank = current_rank
+                    else:
+                        rank = i + 1
+                        current_rank = rank
                         
-                        # Dictionnaire pour stocker les résultats saisis
-                        rank_inputs = {}
+                    player_ranks[uid] = rank
+                    player_names[uid] = uname if p.get("is_active", True) else f"{uname} (Parti)"
+
+                # Remplissage des scores par coup
+                shots_matrix = {}
+                for s in scores_data:
+                    uid = s["user_id"]
+                    shot_num = s["shot_number"]
+                    if shot_num not in shots_matrix:
+                        shots_matrix[shot_num] = {}
+                    
+                    if s["is_absent"]:
+                        shots_matrix[shot_num][uid] = "-"
+                    elif s["score"] < 0:
+                        shots_matrix[shot_num][uid] = "-" # Si non saisi (-1)
+                    else:
+                        shots_matrix[shot_num][uid] = s["score"]
+
+                # 2. Construction d'un tableau HTML sur-mesure (Lignes = Coups, Colonnes = Joueurs triés avec style Podium)
+                if not sorted_participants or current_shot < 1:
+                    st.info("Aucun score enregistré pour l'instant.")
+                else:
+                    html_table = "<div style='overflow-x: auto;'><table style='width: 100%; border-collapse: collapse; margin-bottom: 25px; background: rgba(255,255,255, 0.03); border-radius: 8px; overflow: hidden; border: 1px solid rgba(198, 156, 37, 0.3); font-family: Montserrat, sans-serif;'>"
+                    
+                    # Ligne d'en-tête (Noms des joueurs triés)
+                    html_table += "<thead style='background-color: rgba(198, 156, 37, 0.1); border-bottom: 2px solid #C69C25;'><tr>"
+                    html_table += "<th style='padding: 12px; text-align: left; color: #C69C25; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px;'>Coup</th>"
+                    
+                    for p in sorted_participants:
+                        uid = p["user_id"]
+                        rank = player_ranks[uid]
                         
-                        # On crée une ligne par joueur pour saisir son rang
-                        for p in participants:
-                            u_name = p.get('profiles', {}).get('username', 'Inconnu')
-                            u_id = p['user_id']
+                        th_bg = "transparent"
+                        th_color = "#C69C25"
+                        if rank == 1:
+                            th_bg = "rgba(198, 156, 37, 0.15)"
+                            th_color = "#FFD700"
+                        elif rank == 2:
+                            th_bg = "rgba(224, 255, 255, 0.08)"
+                            th_color = "#E0FFFF"
+                        elif rank == 3:
+                            th_bg = "rgba(205, 127, 50, 0.08)"
+                            th_color = "#CD7F32"
                             
-                            # On met 0 par défaut (il faudra que l'admin change la valeur)
-                            rank_inputs[u_id] = st.number_input(f"Rang pour {u_name}", min_value=1, max_value=len(participants), value=1, key=f"rank_{u_id}")
+                        html_table += f"<th style='padding: 12px; text-align: center; background-color: {th_bg}; color: {th_color}; font-size: 0.9em; font-weight: 600;'>{player_names[uid]}<br><span style='font-size: 0.75em; opacity: 0.7;'>(#{rank})</span></th>"
+                    html_table += "</tr></thead><tbody>"
+
+                    # Lignes pour chaque coup
+                    for s_num in range(1, current_shot):
+                        html_table += f"<tr style='border-bottom: 1px solid rgba(198, 156, 37, 0.15);'><td style='padding: 12px; font-weight: bold; color: #C69C25;'>Coup {s_num}</td>"
+                        for p in sorted_participants:
+                            uid = p["user_id"]
+                            val = shots_matrix.get(s_num, {}).get(uid, "-")
+                            rank = player_ranks[uid]
                             
-                        submit_close = st.form_submit_button("Clôturer le Tournoi 🔒", type="primary")
+                            td_bg = "transparent"
+                            if rank == 1: td_bg = "rgba(198, 156, 37, 0.05)"
+                            elif rank == 2: td_bg = "rgba(224, 255, 255, 0.03)"
+                            elif rank == 3: td_bg = "rgba(205, 127, 50, 0.03)"
+                            
+                            html_table += f"<td style='padding: 12px; text-align: center; background-color: {td_bg}; opacity: 0.9;'>{val}</td>"
+                        html_table += "</tr>"
+
+                    # Ligne finale des Totaux
+                    html_table += "<tr style='background-color: rgba(198, 156, 37, 0.08); border-top: 2px solid #C69C25; font-weight: bold;'><td style='padding: 12px; color: #C69C25;'>TOTAL 🏆</td>"
+                    for p in sorted_participants:
+                        uid = p["user_id"]
+                        tot = player_totals[uid]
+                        rank = player_ranks[uid]
                         
-                        if submit_close:
-                            success, msg = db.close_weekly_tournament(current_weekly['id'], rank_inputs)
+                        td_bg = "transparent"
+                        if rank == 1: td_bg = "rgba(198, 156, 37, 0.1)"
+                        elif rank == 2: td_bg = "rgba(224, 255, 255, 0.05)"
+                        elif rank == 3: td_bg = "rgba(205, 127, 50, 0.05)"
+                        
+                        html_table += f"<td style='padding: 12px; text-align: center; background-color: {td_bg}; color: white; font-size: 1.1em;'>{tot}</td>"
+                    html_table += "</tr></tbody></table></div>"
+
+                    st.markdown(html_table, unsafe_allow_html=True)
+
+                # --- INSCRIPTIONS & ADMIN (PAR COUP) ---
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    if is_guest:
+                        st.info("🔒 Connectez-vous pour jouer.")
+                    elif not is_registered:
+                        if st.button("✅ M'inscrire au tournoi", type="primary", use_container_width=True):
+                            db.register_weekly(current_weekly['id'], user['id'])
+                            st.rerun()
+
+                if is_admin:
+                    st.divider()
+                    st.markdown(f"### ⚙️ Panneau d'Arbitrage - Coup N°{current_shot}")
+                    
+                    # Modération : Retardataires et Abandons
+                    with st.expander("🛠️ Gérer les joueurs (Retards / Abandons)"):
+                        ca, cb = st.columns(2)
+                        with ca:
+                            st.markdown("**➕ Ajouter un retardataire**")
+                            all_p_res = db.get_leaderboard().data
+                            p_names = [p['username'] for p in all_p_res if p['id'] not in [x['user_id'] for x in participants]]
+                            t_add = st.selectbox("Joueur à ajouter", ["-- Choisir --"] + p_names, key="add_t")
+                            if st.button("Ajouter à la partie") and t_add != "-- Choisir --":
+                                target_id = next(p['id'] for p in all_p_res if p['username'] == t_add)
+                                db.register_weekly(current_weekly['id'], target_id)
+                                st.rerun()
+                        with cb:
+                            st.markdown("**🚪 Signaler un départ**")
+                            active_names = [p.get('profiles', {}).get('username') for p in participants if p.get('is_active', True)]
+                            t_rem = st.selectbox("Joueur qui part", ["-- Choisir --"] + active_names, key="rem_t")
+                            if st.button("Retirer de la table") and t_rem != "-- Choisir --":
+                                rem_id = next(p['user_id'] for p in participants if p.get('profiles', {}).get('username') == t_rem)
+                                db.admin_remove_participant(current_weekly['id'], rem_id)
+                                st.rerun()
+
+                    # Tous les joueurs actifs affichés en même temps
+                    active_players = [p for p in sorted_participants if p.get("is_active", True)]
+
+                    if not active_players:
+                        st.info("Aucun joueur actif pour l'instant.")
+                    else:
+                        with st.form("score_input_form_unified"):
+                            st.write(f"Saisissez les points de chaque joueur pour le **Coup N°{current_shot}** (Non saisi : -1) :")
+                            cols = st.columns(4)
+                            score_inputs = {}
+                            
+                            for idx, p in enumerate(active_players):
+                                uname = p.get('profiles', {}).get('username', 'Inconnu')
+                                uid = p["user_id"]
+                                
+                                # Valeur actuelle en base ou -1 par défaut si non saisi
+                                ex_score = next((s["score"] for s in scores_data if s["user_id"] == uid and s["shot_number"] == current_shot and not s["is_absent"]), -1)
+                                
+                                with cols[idx % 4]:
+                                    score_inputs[uid] = st.number_input(uname, min_value=-1, max_value=100, value=ex_score, step=1, key=f"score_{uid}_shot_{current_shot}")
+                                    
+                            # Bouton pour sauvegarder les modifications SANS changer de coup
+                            submit_save = st.form_submit_button("💾 Enregistrer les scores (Rester sur ce coup)", type="secondary", use_container_width=True)
+                            
+                            if submit_save:
+                                db.save_weekly_shot_scores(current_weekly['id'], current_shot, score_inputs)
+                                st.success("Modifications enregistrées en direct !")
+                                st.rerun()
+
+                    st.write("")
+                    # Boutons d'action de navigation
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        if st.button(f"⏭️ Valider et Passer au Coup Suivant", type="primary", use_container_width=True):
+                            auto_inputs = {}
+                            for p in active_players:
+                                uid = p["user_id"]
+                                val_key = f"score_{uid}_shot_{current_shot}"
+                                auto_inputs[uid] = st.session_state.get(val_key, -1)
+                            
+                            db.save_weekly_shot_scores(current_weekly['id'], current_shot, auto_inputs)
+                            db.next_weekly_shot(current_weekly['id'], current_shot)
+                            st.rerun()
+                    with col_b2:
+                        if st.button("🚨 Terminer le tournoi (Classement final)", type="secondary", use_container_width=True):
+                            success, msg = db.auto_close_par_coup(current_weekly['id'])
                             if success:
                                 st.success(msg)
+                                st.balloons()
                                 st.rerun()
                             else:
                                 st.error(msg)
+
+            # --- MODE : ARBRE CLASSIQUE ---
+            elif t_type == "bracket":
+                st.markdown("### 🌳 L'Arbre en direct")
+                matches = db.get_weekly_bracket_matches(current_weekly['id'])
+                
+                if not matches:
+                    st.error("Arbre non généré.")
+                else:
+                    tier_dict = {m["bracket_match_id"]: m for m in matches}
+                    
+                    def draw_bracket_match(col, m, r_num, m_num):
+                        with col.container(border=True):
+                            st.markdown(f"<div style='text-align:center; font-size:10px; opacity:0.5;'>Match {m_num}</div>", unsafe_allow_html=True)
+                            if m:
+                                p1_name = all_users.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
+                                p2_name = all_users.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
+                                is_done = m["status"] == "completed"
+                                
+                                c1, c2 = st.columns([3, 1])
+                                c1.write(f"**{p1_name}**" + (" 🏆" if is_done and m.get("winner_id") == m.get("player1_id") else ""))
+                                c2.markdown(f"<div style='color:#C69C25; font-weight:bold; text-align:right;'>{m.get('score1', 0) if is_done else ''}</div>", unsafe_allow_html=True)
+                                
+                                c3, c4 = st.columns([3, 1])
+                                c3.write(f"**{p2_name}**" + (" 🏆" if is_done and m.get("winner_id") == m.get("player2_id") else ""))
+                                c4.markdown(f"<div style='color:#C69C25; font-weight:bold; text-align:right;'>{m.get('score2', 0) if is_done else ''}</div>", unsafe_allow_html=True)
+                                
+                                # Saisie Arbitre
+                                if is_admin and not is_done and p1_name != "..." and p2_name != "...":
+                                    with st.expander("Saisir Score"):
+                                        s1 = st.number_input(f"Score {p1_name}", 0, 20, 0, key=f"s1_{m['id']}")
+                                        s2 = st.number_input(f"Score {p2_name}", 0, 20, 0, key=f"s2_{m['id']}")
+                                        if st.button("Valider ce match", key=f"btn_{m['id']}"):
+                                            if s1 == s2: st.error("Pas d'égalité possible.")
+                                            else:
+                                                db.update_weekly_bracket_score(m["id"], s1, s2, m["player1_id"], m["player2_id"], current_weekly['id'], m["bracket_match_id"])
+                                                st.rerun()
+
+                    # Affichage visuel 4 Tours (16 joueurs)
+                    cols_r = st.columns(4)
+                    for r in range(1, 5):
+                        cols_r[r-1].markdown(f"<h5 style='text-align:center; color:#C69C25;'>Tour {r}</h5>", unsafe_allow_html=True)
+                        nb_matches = 16 // (2**r)
+                        for m_num in range(1, nb_matches + 1):
+                            m = tier_dict.get(f"WB_R{r}_M{m_num}")
+                            draw_bracket_match(cols_r[r-1], m, r, m_num)
+                            
+                    if is_admin:
+                        st.divider()
+                        st.info("Une fois la finale terminée, clôturez le tournoi pour figer l'archive.")
+                        if st.button("🚨 TERMINER LE TOURNOI ET ARCHIVER", type="primary"):
+                            # L'arbre attribue automatiquement les gagnants à titre d'archives simplifiées
+                            db.supabase.table("weekly_tournaments").update({"status": "archived"}).eq("id", current_weekly['id']).execute()
+                            st.success("Tournoi archivé !")
+                            st.rerun()
+
     # ==========================================
-    # 🗄️ SECTION ARCHIVES : LES ANCIENS WEEKLY FUNS
+    # 🗄️ SECTION ARCHIVES
     # ==========================================
     st.divider()
     st.header("🗄️ Les Archives du Fun")
@@ -4212,44 +4407,47 @@ elif page == "🍻 Weekly Fun":
     past_weeklys = db.get_past_weekly_tournaments()
     
     if not past_weeklys:
-        st.info("Aucune archive pour le moment. Le premier Weekly Fun est encore en cours ou n'a pas commencé !")
+        st.info("Aucune archive pour le moment.")
     else:
-        # 1. Création du menu déroulant
-        import pandas as pd
         weekly_options = {}
         for pt in past_weeklys:
             date_str = pd.to_datetime(pt['event_date']).strftime('%d/%m/%Y')
-            # Format du nom dans le menu : "25/03/2026 - Le roi de la visée"
-            weekly_options[f"{date_str} - {pt['name']}"] = pt
+            m_tag = "🎯" if pt.get("tournament_type") == "par_coup" else ("🌳" if pt.get("tournament_type") == "bracket" else "🎲")
+            weekly_options[f"{date_str} {m_tag} {pt['name']}"] = pt
             
         selected_weekly_name = st.selectbox("Sélectionnez un ancien tournoi :", list(weekly_options.keys()))
         selected_weekly = weekly_options[selected_weekly_name]
+        st.markdown(f"**Règles :** *{selected_weekly.get('description', 'Classique')}*")
         
-        # 2. Affichage des détails du tournoi sélectionné
-        st.markdown(f"**Description :** *{selected_weekly.get('description', 'Aucune règle spéciale.')}*")
-        
-        p_participants = db.get_weekly_participants(selected_weekly['id'])
-        
-        if not p_participants:
-            st.write("Aucun joueur n'avait participé à cette édition.")
+        # Affichage Par Coup
+        if selected_weekly.get("tournament_type") == "par_coup":
+            scores_data = db.get_weekly_scores(selected_weekly['id'])
+            p_parts = db.get_weekly_participants(selected_weekly['id'])
+            if scores_data:
+                max_shot = max(s["shot_number"] for s in scores_data)
+                board = {p["user_id"]: {"Joueur": p.get('profiles', {}).get('username', 'Inconnu'), "Total": 0} for p in p_parts}
+                for s in range(1, max_shot + 1):
+                    for uid in board: board[uid][f"Coup {s}"] = "-"
+                for s in scores_data:
+                    if s["user_id"] in board and not s["is_absent"]:
+                        board[s["user_id"]][f"Coup {s['shot_number']}"] = s["score"]
+                        board[s["user_id"]]["Total"] += s["score"]
+                        
+                sorted_board = sorted(list(board.values()), key=lambda x: x["Total"], reverse=True)
+                current_rank = 1
+                for i, row in enumerate(sorted_board):
+                    if i > 0 and sorted_board[i]["Total"] == sorted_board[i-1]["Total"]: row["Rang"] = current_rank
+                    else:
+                        current_rank = i + 1; row["Rang"] = current_rank
+                st.dataframe(pd.DataFrame(sorted_board)[["Rang", "Joueur", "Total"] + [f"Coup {s}" for s in range(1, max_shot + 1)]], use_container_width=True, hide_index=True)
+
+        # Affichage Arbre ou Ancien
         else:
-            p_participants_sorted = sorted(p_participants, key=lambda x: x.get('final_rank', 999))
-            
-            st.markdown("### 🏆 Classement Final")
-            
-            # Préparation des données pour notre belle fonction
-            archive_data = []
-            for index, p in enumerate(p_participants_sorted, start=1):
-                p_name = p.get('profiles', {}).get('username', 'Inconnu')
-                display_rank = p.get('final_rank', index)
-                archive_data.append({
-                    "Rang": display_rank,
-                    "Joueur": p_name
-                })
-            
-            # Affichage majestueux
-            st.markdown(draw_luxury_table(archive_data), unsafe_allow_html=True)
-            st.write("") # Petit espace pour respirer
+            p_parts = db.get_weekly_participants(selected_weekly['id'])
+            if p_parts:
+                p_parts_sorted = sorted(p_parts, key=lambda x: x.get('final_rank', 999))
+                archive_data = [{"Rang": p.get('final_rank', '-'), "Joueur": p.get('profiles', {}).get('username', 'Inconnu')} for p in p_parts_sorted]
+                st.markdown(draw_luxury_table(archive_data), unsafe_allow_html=True)
 
 elif page == "🧠 Entraînements":
     st.header("🧠 Sessions d'Entraînement et Cours")

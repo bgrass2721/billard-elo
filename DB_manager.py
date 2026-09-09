@@ -623,44 +623,33 @@ class DBManager:
         except Exception as e:
             return False, f"Erreur lors de la fusion : {str(e)}"
 
-    def create_weekly_tournament(self, name, description, max_players, event_date):
-        """Crée un nouveau tournoi hebdomadaire (Weekly Fun)."""
+    def create_weekly_tournament(self, name, description, max_players, event_date, tournament_type="par_coup"):
         try:
-            # On convertit la date au format texte pour Supabase (YYYY-MM-DD)
-            date_str = event_date.strftime("%Y-%m-%d")
+            # Archiver l'ancien
+            self.supabase.table("weekly_tournaments").update({"status": "archived"}).eq("status", "open").execute()
             
-            # On insère les données dans la nouvelle table
             data = {
                 "name": name,
                 "description": description,
                 "max_players": max_players,
-                "event_date": date_str,
-                "status": "open" # Ouvert aux inscriptions par défaut
+                "event_date": str(event_date),
+                "status": "open",
+                "tournament_type": tournament_type, # NOUVEAU
+                "current_shot": 1 # NOUVEAU
             }
-            
-            res = self.supabase.table("weekly_tournaments").insert(data).execute()
-            
-            if res.data:
-                return True, "Tournoi Weekly Fun créé avec succès !"
-            return False, "Erreur lors de la création."
+            self.supabase.table("weekly_tournaments").insert(data).execute()
+            return True, "Nouveau tournoi Weekly Fun créé !"
         except Exception as e:
-            return False, f"Erreur technique : {e}"
+            return False, f"Erreur : {e}"
 
     def get_current_weekly_tournament(self):
-        """Récupère le tournoi Weekly Fun actuellement ouvert (le plus récent)."""
+        """Récupère le tournoi actif (qu'il soit en inscription ou déjà lancé)"""
         try:
-            res = (
-                self.supabase.table("weekly_tournaments")
-                .select("*")
-                .eq("status", "open")
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
+            res = self.supabase.table("weekly_tournaments").select("*").in_("status", ["open", "in_progress"]).order("created_at", desc=True).limit(1).execute()
             if res.data:
                 return res.data[0]
             return None
-        except Exception as e:
+        except Exception:
             return None
 
     def get_weekly_participants(self, tournament_id):
@@ -679,27 +668,42 @@ class DBManager:
             return []
 
     def register_weekly(self, tournament_id, user_id):
-        """Inscrit un joueur au tournoi."""
         try:
-            # On vérifie s'il n'est pas déjà inscrit pour éviter les doublons
+            # Récupérer infos du tournoi
+            t_res = self.supabase.table("weekly_tournaments").select("tournament_type, current_shot").eq("id", tournament_id).single().execute()
+            t_data = t_res.data
+
             existing = self.supabase.table("weekly_participants").select("*").eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            
             if existing.data:
-                # S'il était désinscrit avant, on supprime la vieille trace pour lui donner un nouveau "created_at"
-                self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
-                
-            data = {"tournament_id": tournament_id, "user_id": user_id, "status": "registered"}
-            self.supabase.table("weekly_participants").insert(data).execute()
-            return True, "Inscription réussie !"
+                # Si déjà dans la liste mais inactif, on le réactive
+                self.supabase.table("weekly_participants").update({"is_active": True}).eq("id", existing.data[0]["id"]).execute()
+            else:
+                self.supabase.table("weekly_participants").insert({
+                    "tournament_id": tournament_id,
+                    "user_id": user_id,
+                    "is_active": True
+                }).execute()
+
+            # NOUVEAU : Backfill des zéros si c'est un mode "par coup" et qu'il arrive en retard (ex: au coup 4)
+            if t_data and t_data.get("tournament_type") == "par_coup" and t_data.get("current_shot", 1) > 1:
+                for s in range(1, t_data["current_shot"]):
+                    try:
+                        self.supabase.table("weekly_scores").insert({
+                            "tournament_id": tournament_id,
+                            "user_id": user_id,
+                            "shot_number": s,
+                            "score": 0,
+                            "is_absent": True
+                        }).execute()
+                    except:
+                        pass # Ignore si le score existe déjà par sécurité
+            return True
         except Exception as e:
-            return False, f"Erreur : {e}"
+            return False
 
     def unregister_weekly(self, tournament_id, user_id):
-        """Désinscrit un joueur du tournoi en supprimant sa ligne."""
-        try:
-            self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
-            return True, "Désinscription réussie."
-        except Exception as e:
-            return False, f"Erreur : {e}"
+        return self.admin_remove_participant(tournament_id, user_id)
 
     def close_weekly_tournament(self, tournament_id, rankings):
         """Clôture le tournoi hebdomadaire, enregistre les rangs et donne le titre au gagnant."""
@@ -731,12 +735,16 @@ class DBManager:
             return False, f"Erreur lors de la clôture : {e}"
 
     def admin_remove_participant(self, tournament_id, user_id):
-        """L'admin supprime un participant du tournoi."""
         try:
-            self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
-            return True, "Joueur retiré."
+            # NOUVEAU : Si le tournoi a des scores enregistrés pour lui, on le "désactive" au lieu de le supprimer
+            scores = self.supabase.table("weekly_scores").select("id").eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            if scores.data:
+                self.supabase.table("weekly_participants").update({"is_active": False}).eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            else:
+                self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+            return True
         except Exception as e:
-            return False, f"Erreur : {e}"
+            return False
     
     def get_user_gt_stats(self, user_id):
         """Récupère le palmarès d'un joueur pour les Grands Tournois (Panthéon)."""
@@ -935,9 +943,6 @@ class DBManager:
         except Exception as e:
             return False, f"Erreur lors du calcul des classements : {e}"
 
-    # ==========================================
-    # 🧠 GESTION DES ENTRAÎNEMENTS (COURS)
-    # ==========================================
     def create_training(self, name, description, max_players, event_date):
         """Crée un nouvel entraînement et archive l'ancien."""
         try:
@@ -1198,3 +1203,204 @@ class DBManager:
             return True, f"Saison {season_name} clôturée avec succès ({mode}) !"
         except Exception as e:
             return False, f"Erreur lors de la clôture : {str(e)}"
+
+    def get_weekly_scores(self, tournament_id):
+        """Récupère tous les scores d'un tournoi"""
+        res = self.supabase.table("weekly_scores").select("*").eq("tournament_id", tournament_id).execute()
+        return res.data
+
+    def save_weekly_shot_scores(self, tournament_id, shot_number, scores_dict):
+        """scores_dict est un dictionnaire {user_id: score} tapé par l'admin"""
+        try:
+            for uid, score in scores_dict.items():
+                existing = self.supabase.table("weekly_scores").select("id").eq("tournament_id", tournament_id).eq("user_id", uid).eq("shot_number", shot_number).execute()
+                if existing.data:
+                    self.supabase.table("weekly_scores").update({"score": score, "is_absent": False}).eq("id", existing.data[0]["id"]).execute()
+                else:
+                    self.supabase.table("weekly_scores").insert({
+                        "tournament_id": tournament_id,
+                        "user_id": uid,
+                        "shot_number": shot_number,
+                        "score": score,
+                        "is_absent": False
+                    }).execute()
+            return True, "Scores enregistrés avec succès !"
+        except Exception as e:
+            return False, f"Erreur : {e}"
+
+    def next_weekly_shot(self, tournament_id, current_shot):
+        """Passe au coup suivant et gère les joueurs inactifs (abandon ou partis)"""
+        try:
+            self.supabase.table("weekly_tournaments").update({"current_shot": current_shot + 1}).eq("id", tournament_id).execute()
+            
+            # Les inactifs reçoivent un 0 automatique et un trait "-" (is_absent=True)
+            inactifs = self.supabase.table("weekly_participants").select("user_id").eq("tournament_id", tournament_id).eq("is_active", False).execute()
+            for row in inactifs.data:
+                try:
+                    self.supabase.table("weekly_scores").insert({
+                        "tournament_id": tournament_id,
+                        "user_id": row["user_id"],
+                        "shot_number": current_shot,
+                        "score": 0,
+                        "is_absent": True
+                    }).execute()
+                except:
+                    pass
+            return True, f"Coup {current_shot} validé ! On passe au coup {current_shot + 1}."
+        except Exception as e:
+            return False, str(e)
+
+    def auto_close_par_coup(self, tournament_id):
+        """Calcule les ex-aequo, attribue les rangs finaux et clôture le tournoi"""
+        try:
+            # 1. Récupérer tous les scores
+            scores_data = self.supabase.table("weekly_scores").select("user_id, score").eq("tournament_id", tournament_id).execute().data
+            
+            # 2. Additionner le total par joueur
+            totals = {}
+            for row in scores_data:
+                uid = row["user_id"]
+                totals[uid] = totals.get(uid, 0) + row["score"]
+                
+            # 3. Trier du plus grand au plus petit score
+            sorted_players = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+            
+            # 4. Magie des ex-aequo (1er, 1er, 3ème...)
+            rank_updates = {}
+            current_rank = 1
+            for i in range(len(sorted_players)):
+                if i > 0 and sorted_players[i][1] == sorted_players[i-1][1]:
+                    rank_updates[sorted_players[i][0]] = current_rank
+                else:
+                    current_rank = i + 1
+                    rank_updates[sorted_players[i][0]] = current_rank
+            
+            # 5. Enregistrer les rangs
+            for uid, rank in rank_updates.items():
+                self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
+                
+            # 6. Clôturer officiellement
+            self.supabase.table("weekly_tournaments").update({"status": "archived"}).eq("id", tournament_id).execute()
+            
+            return True, "🏁 Tournoi clôturé ! Les rangs et ex-aequo ont été attribués automatiquement."
+        except Exception as e:
+            return False, f"Erreur lors de la clôture : {e}"
+
+    def get_weekly_bracket_matches(self, tournament_id):
+        """Récupère les matchs de l'arbre pour le mode classique"""
+        res = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute()
+        return res.data
+
+    def start_weekly_tournament(self, tournament_id, t_type):
+        """Clôture les inscriptions et génère l'arbre ou le scoreboard"""
+        import random
+        import math
+        try:
+            # 1. On passe le tournoi en mode "En direct"
+            self.supabase.table("weekly_tournaments").update({"status": "in_progress"}).eq("id", tournament_id).execute()
+
+            # 2. Si c'est un arbre, on fait le tirage au sort automatique !
+            if t_type == "bracket":
+                parts = self.supabase.table("weekly_participants").select("user_id").eq("tournament_id", tournament_id).eq("is_active", True).execute().data
+                uids = [p["user_id"] for p in parts][:16] # On limite à 16 joueurs
+                random.shuffle(uids) # 🎲 Tirage au sort aléatoire complet !
+
+                # S'il y a moins de 16 joueurs, on comble avec des "Vides" (Byes)
+                while len(uids) < 16:
+                    uids.append(None)
+
+                bracket_data = []
+                # Création des 4 tours (R1=8 matchs, R2=4, R3=2, R4=1)
+                for r in range(1, 5):
+                    nb_matches = 16 // (2**r)
+                    for m in range(1, nb_matches + 1):
+                        match = {
+                            "tournament_id": tournament_id,
+                            "bracket_match_id": f"WB_R{r}_M{m}",
+                            "status": "pending"
+                        }
+                        
+                        # Si c'est le Tour 1, on place les joueurs tirés au sort
+                        if r == 1:
+                            p1 = uids[(m-1)*2]
+                            p2 = uids[(m-1)*2+1]
+                            match["player1_id"] = p1
+                            match["player2_id"] = p2
+                            
+                            # MAGIE DES BYES : Si un joueur n'a pas d'adversaire, il gagne d'office !
+                            if p1 and not p2:
+                                match["winner_id"] = p1
+                                match["status"] = "completed"
+                            elif p2 and not p1:
+                                match["winner_id"] = p2
+                                match["status"] = "completed"
+                            elif not p1 and not p2:
+                                match["status"] = "completed"
+                        
+                        bracket_data.append(match)
+                
+                # On insère tout l'arbre en base de données
+                self.supabase.table("weekly_matches").insert(bracket_data).execute()
+                
+                # On fait avancer automatiquement les joueurs qui ont eu un "Bye" au Tour 2
+                self._propagate_weekly_byes(tournament_id)
+
+            return True, "Le tournoi est lancé ! Les inscriptions sont closes."
+        except Exception as e:
+            return False, f"Erreur lors du lancement : {e}"
+
+    def _propagate_weekly_byes(self, tournament_id):
+        """Pousse automatiquement les vainqueurs par forfait (Byes) au tour suivant"""
+        import math
+        matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute().data
+        m_dict = {m["bracket_match_id"]: m for m in matches}
+        
+        for r in range(1, 4):
+            nb_matches = 16 // (2**r)
+            for m in range(1, nb_matches + 1):
+                curr = m_dict.get(f"WB_R{r}_M{m}")
+                if curr and curr["status"] == "completed" and curr.get("winner_id"):
+                    next_r = r + 1
+                    next_m = math.ceil(m / 2)
+                    is_p1 = (m % 2 != 0)
+                    
+                    next_match_id = f"WB_R{next_r}_M{next_m}"
+                    next_match = self.supabase.table("weekly_matches").select("id").eq("tournament_id", tournament_id).eq("bracket_match_id", next_match_id).execute().data
+                    
+                    if next_match:
+                        col = "player1_id" if is_p1 else "player2_id"
+                        self.supabase.table("weekly_matches").update({col: curr["winner_id"]}).eq("id", next_match[0]["id"]).execute()
+
+    def update_weekly_bracket_score(self, match_id, score1, score2, p1_id, p2_id, tournament_id, bracket_match_id):
+        """Enregistre le score et fait passer le vainqueur au tour suivant"""
+        import math
+        try:
+            winner_id = p1_id if score1 > score2 else p2_id
+            
+            # 1. Mettre à jour le match actuel
+            self.supabase.table("weekly_matches").update({
+                "score1": score1,
+                "score2": score2,
+                "winner_id": winner_id,
+                "status": "completed"
+            }).eq("id", match_id).execute()
+            
+            # 2. Envoyer le vainqueur au tour suivant
+            parts = bracket_match_id.split('_')
+            r_num = int(parts[1][1:])
+            m_num = int(parts[2][1:])
+            
+            if r_num < 4: # Si ce n'est pas la finale
+                next_r = r_num + 1
+                next_m = math.ceil(m_num / 2)
+                is_p1 = (m_num % 2 != 0)
+                next_match_id = f"WB_R{next_r}_M{next_m}"
+                
+                next_match = self.supabase.table("weekly_matches").select("id").eq("tournament_id", tournament_id).eq("bracket_match_id", next_match_id).execute().data
+                if next_match:
+                    col = "player1_id" if is_p1 else "player2_id"
+                    self.supabase.table("weekly_matches").update({col: winner_id}).eq("id", next_match[0]["id"]).execute()
+                    
+            return True, "Match mis à jour !"
+        except Exception as e:
+            return False, str(e)
