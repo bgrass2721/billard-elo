@@ -1416,3 +1416,50 @@ class DBManager:
             return True, "Match mis à jour !"
         except Exception as e:
             return False, str(e)
+    
+    def close_weekly_bracket(self, tournament_id):
+        """Clôture un tournoi Weekly Fun (Arbre) et calcule les rangs exacts (1, 2, 3, 5, 9)"""
+        try:
+            matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute().data
+            if not matches:
+                return False, "Aucun match trouvé."
+
+            ranks = {}
+            # Dans un arbre de 16 :
+            # Tour 4 (Finale) -> Perdant = 2ème
+            # Tour 3 (Demis) -> Perdants = 3ème
+            # Tour 2 (Quarts) -> Perdants = 5ème
+            # Tour 1 (Huitièmes) -> Perdants = 9ème
+            
+            for m in matches:
+                if m["status"] != "completed":
+                    continue
+                
+                r_num = int(m["bracket_match_id"].split("_")[1].replace("R", ""))
+                p1 = m.get("player1_id")
+                p2 = m.get("player2_id")
+                winner = m.get("winner_id")
+                
+                loser = p1 if winner == p2 else p2
+                
+                # On attribue le rang au perdant s'il existe (ignore les fantômes / None)
+                if loser:
+                    if r_num == 4: ranks[loser] = 2
+                    elif r_num == 3: ranks[loser] = 3
+                    elif r_num == 2: ranks[loser] = 5
+                    elif r_num == 1: ranks[loser] = 9
+                
+                # Le grand gagnant est le vainqueur du Tour 4
+                if r_num == 4 and winner:
+                    ranks[winner] = 1
+                    
+            # 2. Sauvegarde des rangs pour chaque joueur en base de données
+            for user_id, rank in ranks.items():
+                self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
+
+            # 3. Clôture finale du tournoi
+            self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
+            
+            return True, "Tournoi clôturé et classements exacts générés !"
+        except Exception as e:
+            return False, f"Erreur : {e}"

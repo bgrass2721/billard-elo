@@ -4391,9 +4391,13 @@ elif page == "🍻 Weekly Fun":
 
                         st.divider()
                         if st.button("🚨 TERMINER LE TOURNOI ET ARCHIVER", type="primary", use_container_width=True):
-                            db.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", current_weekly['id']).execute()
-                            st.success("Tournoi clôturé et archivé avec succès !")
-                            st.rerun()
+                            success, msg = db.close_weekly_bracket(current_weekly['id'])
+                            if success:
+                                st.success(msg)
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error(msg)
 
     # ==========================================
     # 🗄️ SECTION ARCHIVES
@@ -4440,8 +4444,24 @@ elif page == "🍻 Weekly Fun":
         else:
             p_parts = db.get_weekly_participants(selected_weekly['id'])
             if p_parts:
-                p_parts_sorted = sorted(p_parts, key=lambda x: x.get('final_rank', 999))
-                archive_data = [{"Rang": p.get('final_rank', '-'), "Joueur": p.get('profiles', {}).get('username', 'Inconnu')} for p in p_parts_sorted]
+                # 1. On sépare les vrais joueurs ayant reçu un rang calculé (ignore les fantômes)
+                real_parts = [p for p in p_parts if p.get('final_rank') is not None]
+                
+                # 2. Sécurité : S'il s'agit de ton vieux tournoi planté (sans aucun rang enregistré)
+                if not real_parts:
+                    archive_data = [{"Rang": "-", "Joueur": p.get('profiles', {}).get('username', 'Inconnu')} for p in p_parts]
+                else:
+                    # 3. Tri et formatage parfait : 1er, 2ème, 3ème ex-aequo, 5ème...
+                    p_parts_sorted = sorted(real_parts, key=lambda x: x.get('final_rank', 999))
+                    archive_data = []
+                    for p in p_parts_sorted:
+                        r_val = p.get('final_rank')
+                        r_str = f"{r_val}er" if r_val == 1 else f"{r_val}ème"
+                        archive_data.append({
+                            "Rang": r_str, 
+                            "Joueur": p.get('profiles', {}).get('username', 'Inconnu')
+                        })
+                        
                 st.markdown(draw_luxury_table(archive_data), unsafe_allow_html=True)
 
 elif page == "🧠 Entraînements":
