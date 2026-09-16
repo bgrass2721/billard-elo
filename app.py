@@ -4446,16 +4446,107 @@ elif page == "🍻 Weekly Fun":
                 df_cols = ["Rang", "Joueur", "Total"] + [f"Coup {s}" for s in range(1, max_shot + 1)]
                 st.markdown(draw_luxury_table(sorted_board, columns=df_cols), unsafe_allow_html=True)
         else:
+            # --- 1. AFFICHAGE DE L'ARBRE PAPILLON DANS LES ARCHIVES ---
+            matches = db.get_weekly_bracket_matches(selected_weekly['id'])
+            if matches:
+                import math
+                nb_matches_r1 = 8
+                total_rounds_wb = 4
+                tier_dict = {m["bracket_match_id"]: m for m in matches}
+                
+                def render_weekly_css_bracket_archive(title):
+                    def get_match_card_weekly_archive(r_num, m_num):
+                        b_id = f"WB_R{r_num}_M{m_num}"
+                        m = tier_dict.get(b_id)
+                        
+                        bg_color = "rgba(15, 23, 42, 0.9)"
+                        border_color = "#C69C25" if r_num == total_rounds_wb else "rgba(198, 156, 37, 0.4)"
+                        
+                        c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
+                        c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
+                        
+                        if m:
+                            p1_raw = m.get("player1_id")
+                            p2_raw = m.get("player2_id")
+                            
+                            p1 = all_users.get(p1_raw, "Fantôme / BYE") if p1_raw else "Fantôme / BYE"
+                            p2 = all_users.get(p2_raw, "Fantôme / BYE") if p2_raw else "Fantôme / BYE"
+                            
+                            s1 = m.get("score1", 0)
+                            s2 = m.get("score2", 0)
+                            
+                            # Dans les archives, on assume que le match est terminé
+                            w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
+                            w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
+                            c1_score = "#C69C25" if s1 > s2 else "#888"
+                            c2_score = "#C69C25" if s2 > s1 else "#888"
+                            
+                            disp_s1 = str(s1)
+                            disp_s2 = str(s2)
+                            
+                            if p1 == "Fantôme / BYE" and p2 == "Fantôme / BYE": 
+                                disp_s1 = disp_s2 = ""
+                            
+                            c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{disp_s1}</span></div>"
+                            c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{disp_s2}</span></div>"
+                        else:
+                            lbl = "Fantôme / BYE"
+                            c_html += f"<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>{lbl}</span><span></span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>{lbl}</span><span></span></div>"
+                        
+                        c_html += "</div>"
+                        return c_html
+
+                    html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
+                    html += "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: 400px;'>"
+                    
+                    # --- A. PARTIE GAUCHE ---
+                    html += "<div style='display: flex; flex-direction: row;'>"
+                    for r_num in range(1, total_rounds_wb):
+                        html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
+                        html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>Tour {r_num}</div>"
+                        html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                        expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                        half_count = expected_count // 2
+                        for m_num in range(1, half_count + 1):
+                            html += get_match_card_weekly_archive(r_num, m_num)
+                        html += "</div></div>"
+                    html += "</div>"
+                    
+                    # --- B. CENTRE (GRANDE FINALE) ---
+                    html += "<div style='display: flex; flex-direction: column; justify-content: center; flex: 0 0 220px; margin: 0 10px; gap: 40px;'>"
+                    html += "<div>"
+                    html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
+                    html += get_match_card_weekly_archive(total_rounds_wb, 1)
+                    html += "</div>"
+                    html += "</div>"
+                    
+                    # --- C. PARTIE DROITE (INVERSÉE) ---
+                    html += "<div style='display: flex; flex-direction: row-reverse;'>"
+                    for r_num in range(1, total_rounds_wb):
+                        html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-left: 30px;'>"
+                        html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>Tour {r_num}</div>"
+                        html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
+                        expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
+                        half_count = expected_count // 2
+                        for m_num in range(half_count + 1, expected_count + 1):
+                            html += get_match_card_weekly_archive(r_num, m_num)
+                        html += "</div></div>"
+                    html += "</div>"
+                    
+                    html += "</div>"
+                    return html
+
+                with st.expander("👀 Voir l'Arbre du Tournoi", expanded=True):
+                    st.markdown(render_weekly_css_bracket_archive("🏆 Arbre Final"), unsafe_allow_html=True)
+            
+            # --- 2. AFFICHAGE DU CLASSEMENT FINAL EN DESSOUS ---
+            st.markdown("#### 📊 Classement Final")
             p_parts = db.get_weekly_participants(selected_weekly['id'])
             if p_parts:
-                # 1. On sépare les vrais joueurs ayant reçu un rang calculé (ignore les fantômes)
                 real_parts = [p for p in p_parts if p.get('final_rank') is not None]
-                
-                # 2. Sécurité : S'il s'agit de ton vieux tournoi planté (sans aucun rang enregistré)
                 if not real_parts:
                     archive_data = [{"Rang": "-", "Joueur": p.get('profiles', {}).get('username', 'Inconnu')} for p in p_parts]
                 else:
-                    # 3. Tri et formatage parfait : 1er, 2ème, 3ème ex-aequo, 5ème...
                     p_parts_sorted = sorted(real_parts, key=lambda x: x.get('final_rank', 999))
                     archive_data = []
                     for p in p_parts_sorted:
@@ -4465,7 +4556,6 @@ elif page == "🍻 Weekly Fun":
                             "Rang": r_str, 
                             "Joueur": p.get('profiles', {}).get('username', 'Inconnu')
                         })
-                        
                 st.markdown(draw_luxury_table(archive_data), unsafe_allow_html=True)
 
 elif page == "🧠 Entraînements":
