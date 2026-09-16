@@ -4270,13 +4270,12 @@ elif page == "🍻 Weekly Fun":
                     tier_dict = {m["bracket_match_id"]: m for m in matches}
                     
                     def render_weekly_css_bracket(prefix, title):
-                        def get_match_card_weekly(r_num, m_num):
+                        def get_match_card_weekly(r_num, m_num, is_gf=False):
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
                             
                             bg_color = "rgba(15, 23, 42, 0.9)"
-                            border_color = "rgba(198, 156, 37, 0.4)"
-                            if r_num == total_rounds_wb: border_color = "#C69C25" # Finale = Or
+                            border_color = "#C69C25" if is_gf else "rgba(198, 156, 37, 0.4)"
                             
                             c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
                             c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
@@ -4285,7 +4284,6 @@ elif page == "🍻 Weekly Fun":
                                 p1_raw = m.get("player1_id")
                                 p2_raw = m.get("player2_id")
                                 
-                                # 🔴 AFFICHAGE INTELLIGENT : Fantôme ou En Attente ?
                                 if p1_raw:
                                     p1 = all_users.get(p1_raw, "Fantôme / BYE")
                                 else:
@@ -4296,24 +4294,30 @@ elif page == "🍻 Weekly Fun":
                                 else:
                                     p2 = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
                                 
-                                s1, s2 = m.get("score1", 0), m.get("score2", 0)
+                                s1 = m.get("score1", 0)
+                                s2 = m.get("score2", 0)
+                                is_done = (m["status"] == "completed")
                                 
-                                if m["status"] == "completed":
+                                # Gestion des styles de texte selon le vainqueur
+                                if is_done:
                                     w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                     w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                    c1_score = "#C69C25" if s1 > s2 else "transparent"
-                                    c2_score = "#C69C25" if s2 > s1 else "transparent"
+                                    c1_score = "#C69C25" if s1 > s2 else "#888"
+                                    c2_score = "#C69C25" if s2 > s1 else "#888"
+                                    disp_s1 = str(s1)
+                                    disp_s2 = str(s2)
                                 else:
                                     w1 = w2 = "normal; color: white;"
-                                    c1_score = c2_score = "transparent"
-                                    if p1 in ["Fantôme / BYE", "En attente..."] and p2 in ["Fantôme / BYE", "En attente..."]: 
-                                        s1 = s2 = ""
+                                    c1_score = c2_score = "#888"
+                                    # Si pas encore joué, on ne met pas de score par défaut à 0 si c'est vide
+                                    disp_s1 = str(s1) if s1 > 0 else ""
+                                    disp_s2 = str(s2) if s2 > 0 else ""
                                 
-                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
-                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{disp_s1}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{disp_s2}</span></div>"
                             else:
                                 lbl = "Fantôme / BYE" if r_num == 1 else "En attente..."
-                                c_html += f"<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>{lbl}</span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>{lbl}</span></div>"
+                                c_html += f"<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>{lbl}</span><span></span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>{lbl}</span><span></span></div>"
                             
                             c_html += "</div>"
                             return c_html
