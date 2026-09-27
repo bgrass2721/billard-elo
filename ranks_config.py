@@ -20,6 +20,6 @@ RANK_TIERS = [
     {"id": 3, "name": "Virtuose", "threshold": 1150, "icon": f"<img src='{IMG_VIRTUOSE}' style='{icon_style}'>", "color": "#ffd700", "bg_gradient": "linear-gradient(135deg, #5d4037, #ffd700)"},
     {"id": 4, "name": "Légende", "threshold": 1300, "icon": f"<img src='{IMG_LEGENDE}' style='{icon_style}'>", "color": "#9b59b6", "bg_gradient": "linear-gradient(135deg, #311b92, #9b59b6)", "glow": "0 0 10px rgba(155, 89, 182, 0.6)"},
     {"id": 5, "name": "Maître", "threshold": 1450, "icon": f"<img src='{IMG_MAITRE}' style='{icon_style}'>", "color": "#00e5ff", "bg_gradient": "linear-gradient(135deg, #006064, #00e5ff)", "glow": "0 0 15px rgba(0, 229, 255, 0.8)"},
-    {"id": 6, "name": "Grand Maître", "threshold": 1700, "icon": f"<img src='{IMG_GRAND_MAITRE}' style='{icon_style}'>", "color": "#e74c3c", "bg_gradient": "linear-gradient(135deg, #641E16, #e74c3c)", "glow": "0 0 15px rgba(231, 76, 60, 0.8)"},
-    {"id": 7, "name": "Dieu du Billard", "threshold": 2000, "icon": f"<img src='{IMG_DIEU}' style='{icon_style}'>", "color": "#ffffff", "bg_gradient": "linear-gradient(135deg, #B7950B, #FDFEFE)", "glow": "0 0 25px rgba(255, 215, 0, 1)"}
+    {"id": 6, "name": "Grand Maître", "threshold": 1700, "icon": f"<img src='{IMG_GRAND_MAITRE}' style='{icon_style}'>", "color": "#ff0099", "bg_gradient": "linear-gradient(135deg, #4a002d, #ff0099)", "glow": "0 0 15px rgba(255, 0, 153, 0.8)"},
+    {"id": 7, "name": "Dieu du Billard", "threshold": 2000, "icon": f"<img src='{IMG_DIEU}' style='{icon_style}'>", "color": "#E0B0FF", "bg_gradient": "linear-gradient(135deg, #1A0B2E, #6200EA)", "glow": "0 0 25px rgba(157, 76, 255, 1)"}
 ]
