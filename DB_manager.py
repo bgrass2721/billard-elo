@@ -1339,7 +1339,7 @@ class DBManager:
             return False, f"Erreur : {e}"
 
     def process_byes(self, tournament_id):
-    """Valide manuellement les matchs contenant des fantômes après les permutations."""
+        """Valide manuellement les matchs contenant des fantômes après les permutations."""
     try:
         # On récupère tous les matchs en attente
         matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
