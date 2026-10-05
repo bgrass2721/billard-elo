@@ -4387,12 +4387,12 @@ elif page == "🍻 Weekly Fun":
                                 slot1 = next(s for s in slots if s["label"] == choice1)
                                 slot2 = next(s for s in slots if s["label"] == choice2)
 
-                                # 4. CORRECTION : On remet la VRAIE table de l'arbre
-                                db.supabase.table("weekly_bracket_matches").update(
+                                # 4. LA VRAIE TABLE : weekly_matches !
+                                db.supabase.table("weekly_matches").update(
                                     {slot1["field"]: slot2["val"]}
                                 ).eq("id", slot1["match_id"]).execute()
 
-                                db.supabase.table("weekly_bracket_matches").update(
+                                db.supabase.table("weekly_matches").update(
                                     {slot2["field"]: slot1["val"]}
                                 ).eq("id", slot2["match_id"]).execute()
 
