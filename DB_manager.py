@@ -1340,34 +1340,34 @@ class DBManager:
 
     def process_byes(self, tournament_id):
         """Valide manuellement les matchs contenant des fantômes après les permutations."""
-    try:
-        # On récupère tous les matchs en attente
-        matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
-        
-        for m in matches:
-            p1 = m.get("player1_id")
-            p2 = m.get("player2_id")
+        try:
+            # On récupère tous les matchs en attente
+            matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
             
-            # S'il manque au moins un joueur (Fantôme), on force la victoire
-            if not p1 or not p2:
-                updates = {"status": "completed"}
-                if p1 and not p2:
-                    updates["winner_id"] = p1
-                    updates["score1"] = 1
-                    updates["score2"] = 0
-                elif p2 and not p1:
-                    updates["winner_id"] = p2
-                    updates["score1"] = 0
-                    updates["score2"] = 1
-                    
-                # Si c'est un fantôme VS fantôme, on passe juste en "completed"
-                self.supabase.table("weekly_matches").update(updates).eq("id", m["id"]).execute()
-        
-        # On lance la cascade pour faire avancer tout le monde au tour suivant
-        self._propagate_weekly_byes(tournament_id)
-        return True, "✅ Les forfaits (Fantômes) ont été validés et l'arbre a été mis à jour !"
-    except Exception as e:
-        return False, f"Erreur : {e}"
+            for m in matches:
+                p1 = m.get("player1_id")
+                p2 = m.get("player2_id")
+                
+                # S'il manque au moins un joueur (Fantôme), on force la victoire
+                if not p1 or not p2:
+                    updates = {"status": "completed"}
+                    if p1 and not p2:
+                        updates["winner_id"] = p1
+                        updates["score1"] = 1
+                        updates["score2"] = 0
+                    elif p2 and not p1:
+                        updates["winner_id"] = p2
+                        updates["score1"] = 0
+                        updates["score2"] = 1
+                        
+                    # Si c'est un fantôme VS fantôme, on passe juste en "completed"
+                    self.supabase.table("weekly_matches").update(updates).eq("id", m["id"]).execute()
+            
+            # On lance la cascade pour faire avancer tout le monde au tour suivant
+            self._propagate_weekly_byes(tournament_id)
+            return True, "✅ Les forfaits (Fantômes) ont été validés et l'arbre a été mis à jour !"
+        except Exception as e:
+            return False, f"Erreur : {e}"
 
     def _propagate_weekly_byes(self, tournament_id):
         """Pousse les vainqueurs par forfait et résout les matchs Fantôme vs Fantôme en cascade"""
