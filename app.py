@@ -4349,7 +4349,8 @@ elif page == "🍻 Weekly Fun":
                         st.markdown("### ⏩ Valider les Fantômes (BYE)")
                         st.info("Une fois que vous avez terminé d'inverser les positions, cliquez ici pour faire avancer automatiquement les vrais joueurs qui jouent contre des Fantômes.")
                         if st.button("Valider les Fantômes", type="primary", use_container_width=True):
-                            success, msg = db.process_byes(selected_t["id"])
+                            # CORRECTION ICI : On utilise current_weekly au lieu de selected_t
+                            success, msg = db.process_byes(current_weekly["id"])
                             if success:
                                 st.success(msg)
                                 st.rerun()
