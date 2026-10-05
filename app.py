@@ -4349,8 +4349,7 @@ elif page == "🍻 Weekly Fun":
                         st.info("Sélectionnez deux emplacements du Tour 1 pour inverser les joueurs. Pratique pour rééquilibrer l'arbre ou déplacer un 'Fantôme / BYE'.")
                         st.warning("⚠️ À utiliser de préférence *avant* de saisir les scores. Si vous déplacez un joueur, pensez à corriger manuellement les scores du Tour 1 si nécessaire.")
                         
-                        # 1. CORRECTION : On utilise tier_dict pour ignorer les anciens matchs cachés !
-                        # On ajoute aussi un "_" après R1 pour être sûr de ne pas prendre de R10
+                        # 1. On utilise le dictionnaire tier_dict pour ignorer les anciens matchs cachés !
                         r1_matches = [m for k, m in tier_dict.items() if k.startswith("WB_R1_")]
                         r1_matches.sort(key=lambda x: int(x["bracket_match_id"].split("_M")[1]))
 
@@ -4376,7 +4375,7 @@ elif page == "🍻 Weekly Fun":
 
                         slot_labels = [s["label"] for s in slots]
 
-                        # 3. L'interface
+                        # 3. L'interface avec les deux menus déroulants
                         col_s1, col_s2 = st.columns(2)
                         with col_s1:
                             choice1 = st.selectbox("Position A", slot_labels, key="swap_1")
@@ -4388,12 +4387,12 @@ elif page == "🍻 Weekly Fun":
                                 slot1 = next(s for s in slots if s["label"] == choice1)
                                 slot2 = next(s for s in slots if s["label"] == choice2)
 
-                                # 4. CORRECTION : Le bon nom de table est "matches"
-                                db.supabase.table("matches").update(
+                                # 4. CORRECTION : On remet la VRAIE table de l'arbre
+                                db.supabase.table("weekly_bracket_matches").update(
                                     {slot1["field"]: slot2["val"]}
                                 ).eq("id", slot1["match_id"]).execute()
 
-                                db.supabase.table("matches").update(
+                                db.supabase.table("weekly_bracket_matches").update(
                                     {slot2["field"]: slot1["val"]}
                                 ).eq("id", slot2["match_id"]).execute()
 
