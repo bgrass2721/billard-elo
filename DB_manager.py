@@ -1292,7 +1292,7 @@ class DBManager:
         return res.data
 
     def start_weekly_tournament(self, tournament_id, t_type):
-        """Clôture les inscriptions et génère le tournoi avec tirage Humain et cascade de fantômes"""
+        """Clôture les inscriptions et génère le tournoi avec tirage Humain sans valider les fantômes d'avance"""
         import random
         try:
             self.supabase.table("weekly_tournaments").update({"status": "in_progress"}).eq("id", tournament_id).execute()
@@ -1328,12 +1328,15 @@ class DBManager:
                             p2 = match_slots[m-1]["player2_id"]
                             match["player1_id"] = p1
                             match["player2_id"] = p2
-                    
-                bracket_data.append(match)
-        
-        self.supabase.table("weekly_matches").insert(bracket_data).execute()
+                            
+                        bracket_data.append(match)
+                
+                self.supabase.table("weekly_matches").insert(bracket_data).execute()
 
-        return True, "Le tournoi est lancé avec succès !"
+            return True, "Le tournoi est lancé avec succès !"
+            
+        except Exception as e:
+            return False, f"Erreur : {e}"
 
     def process_byes(self, tournament_id):
     """Valide manuellement les matchs contenant des fantômes après les permutations."""
