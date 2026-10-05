@@ -4297,7 +4297,7 @@ elif page == "🍻 Weekly Fun":
                                 s1 = int(m.get("score1") or 0)
                                 s2 = int(m.get("score2") or 0)
                                 
-                                if m["status"] == "completed":
+                                is_done = (m["status"] == "completed")
                                 
                                 # Gestion des styles de texte selon le vainqueur
                                 if is_done:
