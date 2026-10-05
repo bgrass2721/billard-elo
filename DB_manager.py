@@ -1339,18 +1339,19 @@ class DBManager:
             return False, f"Erreur : {e}"
 
     def process_byes(self, tournament_id):
-        """Valide manuellement les matchs contenant des fantômes après les permutations."""
+        """Scanne l'arbre et valide TOUS les matchs contenant des fantômes (peu importe le tour)."""
         try:
-            # On récupère tous les matchs en attente
+            # On récupère tous les matchs "En attente" du tournoi
             matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
             
             for m in matches:
                 p1 = m.get("player1_id")
                 p2 = m.get("player2_id")
                 
-                # S'il manque au moins un joueur (Fantôme), on force la victoire
+                # S'il manque au moins un joueur (C'est un Fantôme / BYE)
                 if not p1 or not p2:
                     updates = {"status": "completed"}
+                    
                     if p1 and not p2:
                         updates["winner_id"] = p1
                         updates["score1"] = 1
@@ -1359,13 +1360,18 @@ class DBManager:
                         updates["winner_id"] = p2
                         updates["score1"] = 0
                         updates["score2"] = 1
+                    else:
+                        # Fantôme vs Fantôme : On passe juste en terminé sans vainqueur
+                        pass
                         
-                    # Si c'est un fantôme VS fantôme, on passe juste en "completed"
+                    # On met à jour ce match spécifique
                     self.supabase.table("weekly_matches").update(updates).eq("id", m["id"]).execute()
             
-            # On lance la cascade pour faire avancer tout le monde au tour suivant
+            # 🚀 La magie opère ici : On lance ta fonction de cascade.
+            # Elle va propulser les vainqueurs au tour suivant et s'auto-résoudre jusqu'à la finale !
             self._propagate_weekly_byes(tournament_id)
-            return True, "✅ Les forfaits (Fantômes) ont été validés et l'arbre a été mis à jour !"
+            
+            return True, "✅ L'arbre a été scanné et tous les Fantômes ont été validés !"
         except Exception as e:
             return False, f"Erreur : {e}"
 
