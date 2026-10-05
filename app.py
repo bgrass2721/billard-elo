@@ -4346,12 +4346,12 @@ elif page == "🍻 Weekly Fun":
                         # 🔄 OUTIL : ÉCHANGER DEUX JOUEURS (SWAP)
                         # ==========================================
                         st.markdown("### 🔄 Permuter deux positions (Tour 1)")
-                        st.info("Sélectionnez deux emplacements du Tour 1 pour inverser les joueurs. Pratique pour rééquilibrer l'arbre ou déplacer un 'Fantôme/BYE'.")
+                        st.info("Sélectionnez deux emplacements du Tour 1 pour inverser les joueurs. Pratique pour rééquilibrer l'arbre ou déplacer un 'Fantôme / BYE'.")
                         st.warning("⚠️ À utiliser de préférence *avant* de saisir les scores. Si vous déplacez un joueur, pensez à corriger manuellement les scores du Tour 1 si nécessaire.")
                         
-                        # 1. Récupérer uniquement les matchs du Tour 1 (Winner Bracket)
-                        r1_matches = [m for m in matches if m["bracket_match_id"].startswith("WB_R1")]
-                        # Trier pour les avoir dans l'ordre de 1 à 8
+                        # 1. CORRECTION : On utilise tier_dict pour ignorer les anciens matchs cachés !
+                        # On ajoute aussi un "_" après R1 pour être sûr de ne pas prendre de R10
+                        r1_matches = [m for k, m in tier_dict.items() if k.startswith("WB_R1_")]
                         r1_matches.sort(key=lambda x: int(x["bracket_match_id"].split("_M")[1]))
 
                         # 2. Créer le dictionnaire des "Slots" (Emplacements)
@@ -4361,14 +4361,12 @@ elif page == "🍻 Weekly Fun":
                             p1_name = all_users.get(m.get("player1_id"), "Fantôme / Vide") if m.get("player1_id") else "Fantôme / Vide"
                             p2_name = all_users.get(m.get("player2_id"), "Fantôme / Vide") if m.get("player2_id") else "Fantôme / Vide"
 
-                            # Slot Joueur 1 du match
                             slots.append({
                                 "label": f"Match {m_num} - Joueur 1 ({p1_name})",
                                 "match_id": m["id"],
                                 "field": "player1_id",
                                 "val": m.get("player1_id")
                             })
-                            # Slot Joueur 2 du match
                             slots.append({
                                 "label": f"Match {m_num} - Joueur 2 ({p2_name})",
                                 "match_id": m["id"],
@@ -4378,7 +4376,7 @@ elif page == "🍻 Weekly Fun":
 
                         slot_labels = [s["label"] for s in slots]
 
-                        # 3. L'interface avec les deux menus déroulants
+                        # 3. L'interface
                         col_s1, col_s2 = st.columns(2)
                         with col_s1:
                             choice1 = st.selectbox("Position A", slot_labels, key="swap_1")
@@ -4390,14 +4388,12 @@ elif page == "🍻 Weekly Fun":
                                 slot1 = next(s for s in slots if s["label"] == choice1)
                                 slot2 = next(s for s in slots if s["label"] == choice2)
 
-                                # 4. Mise à jour croisée dans Supabase
-                                # On met le joueur 2 à la place du 1
-                                db.supabase.table("weekly_bracket_matches").update(
+                                # 4. CORRECTION : Le bon nom de table est "matches"
+                                db.supabase.table("matches").update(
                                     {slot1["field"]: slot2["val"]}
                                 ).eq("id", slot1["match_id"]).execute()
 
-                                # On met le joueur 1 à la place du 2
-                                db.supabase.table("weekly_bracket_matches").update(
+                                db.supabase.table("matches").update(
                                     {slot2["field"]: slot1["val"]}
                                 ).eq("id", slot2["match_id"]).execute()
 
