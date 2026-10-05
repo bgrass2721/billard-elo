@@ -1339,16 +1339,20 @@ class DBManager:
             return False, f"Erreur : {e}"
 
     def process_byes(self, tournament_id):
-        """Scanne l'arbre et valide TOUS les matchs contenant des fantômes (peu importe le tour)."""
+        """Démarre le tournoi en validant uniquement les fantômes du Tour 1, la cascade fera le reste."""
         try:
-            # On récupère tous les matchs "En attente" du tournoi
+            # On récupère les matchs en attente
             matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
             
             for m in matches:
+                # 🛑 SÉCURITÉ ABSOLUE : On ne touche QU'AU TOUR 1 ! Les autres tours sont gérés par la cascade.
+                if not str(m.get("bracket_match_id", "")).startswith("WB_R1_"):
+                    continue
+
                 p1 = m.get("player1_id")
                 p2 = m.get("player2_id")
                 
-                # S'il manque au moins un joueur (C'est un Fantôme / BYE)
+                # Si c'est un match avec au moins un fantôme
                 if not p1 or not p2:
                     updates = {"status": "completed"}
                     
@@ -1361,17 +1365,15 @@ class DBManager:
                         updates["score1"] = 0
                         updates["score2"] = 1
                     else:
-                        # Fantôme vs Fantôme : On passe juste en terminé sans vainqueur
+                        # Fantôme vs Fantôme (0 joueur) -> On clôture juste le slot
                         pass
                         
-                    # On met à jour ce match spécifique
                     self.supabase.table("weekly_matches").update(updates).eq("id", m["id"]).execute()
             
-            # 🚀 La magie opère ici : On lance ta fonction de cascade.
-            # Elle va propulser les vainqueurs au tour suivant et s'auto-résoudre jusqu'à la finale !
+            # On lance la cascade qui va analyser le Tour 1 et faire avancer les vrais joueurs au Tour 2, 3, etc.
             self._propagate_weekly_byes(tournament_id)
             
-            return True, "✅ L'arbre a été scanné et tous les Fantômes ont été validés !"
+            return True, "✅ Les forfaits ont été validés proprement !"
         except Exception as e:
             return False, f"Erreur : {e}"
 
