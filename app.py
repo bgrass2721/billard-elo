@@ -4294,9 +4294,10 @@ elif page == "🍻 Weekly Fun":
                                 else:
                                     p2 = "Fantôme / BYE" if (m["status"] == "completed" or r_num == 1) else "En attente..."
                                 
-                                s1 = m.get("score1", 0)
-                                s2 = m.get("score2", 0)
-                                is_done = (m["status"] == "completed")
+                                s1 = int(m.get("score1") or 0)
+                                s2 = int(m.get("score2") or 0)
+                                
+                                if m["status"] == "completed":
                                 
                                 # Gestion des styles de texte selon le vainqueur
                                 if is_done:
@@ -4368,8 +4369,12 @@ elif page == "🍻 Weekly Fun":
                                     
                                     if p1_raw and p2_raw:
                                         sc1, sc2 = st.columns(2)
-                                        s1 = sc1.number_input("S1", min_value=0, max_value=20, value=m.get("score1", 0), key=f"w_s1_{m['id']}", label_visibility="collapsed")
-                                        s2 = sc2.number_input("S2", min_value=0, max_value=20, value=m.get("score2", 0), key=f"w_s2_{m['id']}", label_visibility="collapsed")
+                                        
+                                        val_s1 = int(m.get("score1") or 0)
+                                        val_s2 = int(m.get("score2") or 0)
+                                        
+                                        s1 = sc1.number_input("S1", min_value=0, max_value=20, value=val_s1, key=f"w_s1_{m['id']}", label_visibility="collapsed")
+                                        s2 = sc2.number_input("S2", min_value=0, max_value=20, value=val_s2, key=f"w_s2_{m['id']}", label_visibility="collapsed")
                                         
                                         btn_lbl = "MAJ" if is_done else "Valider"
                                         if st.button(btn_lbl, key=f"w_btn_{m['id']}", use_container_width=True):
@@ -4472,8 +4477,8 @@ elif page == "🍻 Weekly Fun":
                             p1 = all_users.get(p1_raw, "Fantôme / BYE") if p1_raw else "Fantôme / BYE"
                             p2 = all_users.get(p2_raw, "Fantôme / BYE") if p2_raw else "Fantôme / BYE"
                             
-                            s1 = m.get("score1", 0)
-                            s2 = m.get("score2", 0)
+                            s1 = int(m.get("score1") or 0)
+                            s2 = int(m.get("score2") or 0)
                             
                             # Dans les archives, on assume que le match est terminé
                             w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
