@@ -883,7 +883,7 @@ if st.session_state.user_data is None:
     with tab1:
         with st.form("login_form"):
             email = st.text_input("Email")
-            pwd = st.text_input("Mot de passe", type="password")
+            pwd = st.text_input("Mot de passe", type="password", autocomplete="current-password")
 
             # 1. On capture le clic dans une variable 'submitted'
             submitted = st.form_submit_button("Se connecter")
