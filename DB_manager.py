@@ -1,5 +1,6 @@
 import streamlit as st
 from supabase import create_client
+
 from ranks_config import RANK_TIERS
 
 
@@ -156,7 +157,7 @@ class DBManager:
             return True, "Match révoqué et scores rétablis."
             
         except Exception as e:
-            return False, f"Erreur lors de la révocation : {str(e)}"
+            return False, f"Erreur lors de la révocation : {e!s}"
 
     def dispute_match(self, match_id):
         """Le gagnant conteste le refus du perdant et envoie le match à l'admin"""
@@ -294,7 +295,7 @@ class DBManager:
             return True, "Match validé et classements mis à jour !"
 
         except Exception as e:
-            return False, f"Erreur lors de la validation : {str(e)}"
+            return False, f"Erreur lors de la validation : {e!s}"
 
     def update_user_privacy(self, user_id, hide_lb, hide_prof):
         """Met à jour les préférences de confidentialité"""
@@ -408,7 +409,7 @@ class DBManager:
     def update_gt_match_score(self, match_id, score1, score2, p1_id, p2_id):
         """Met à jour le score d'un match de tournoi et désigne le vainqueur."""
         try:
-            print(f"\n--- 🔎 TENTATIVE DE SAISIE DE SCORE ---")
+            print("\n--- 🔎 TENTATIVE DE SAISIE DE SCORE ---")
             print(f"Match ID ciblé : {match_id}")
             print(f"Joueur 1 ({p1_id}) vs Joueur 2 ({p2_id})")
             print(f"Scores à envoyer : {score1} à {score2}")
@@ -435,7 +436,7 @@ class DBManager:
             return True
             
         except Exception as e:
-            print(f"\n❌ ERREUR CATCHÉE : {str(e)}\n")
+            print(f"\n❌ ERREUR CATCHÉE : {e!s}\n")
             return False
     
     def generate_bracket_matches(self, tournament_id, matchups):
@@ -554,7 +555,7 @@ class DBManager:
                         push_player_to_next_match(loser_id, f"LB_R4_M{m_num}", is_p1=False)
                     elif r_num == 4: 
                         # Perdant de la Finale WB -> LB Tour 6
-                        push_player_to_next_match(loser_id, f"LB_R6_M1", is_p1=False)
+                        push_player_to_next_match(loser_id, "LB_R6_M1", is_p1=False)
 
             # --- B. LOSER BRACKET ---
             elif bracket_type == "LB" and "double" in format_type:
@@ -568,10 +569,10 @@ class DBManager:
                     elif r_num == 4:
                         push_player_to_next_match(winner_id, f"LB_R5_M{math.ceil(m_num / 2)}", is_p1=(m_num % 2 != 0))
                     elif r_num == 5:
-                        push_player_to_next_match(winner_id, f"LB_R6_M1", is_p1=True)
+                        push_player_to_next_match(winner_id, "LB_R6_M1", is_p1=True)
                     elif r_num == 6:
                         # Vainqueur de la finale du Loser -> Retour en Grande Finale contre l'invaincu !
-                        push_player_to_next_match(winner_id, f"WB_R5_M1", is_p1=False)
+                        push_player_to_next_match(winner_id, "WB_R5_M1", is_p1=False)
 
         return True
 
@@ -621,7 +622,7 @@ class DBManager:
 
             return True, "Fusion réussie ! Le joueur a récupéré tout son historique."
         except Exception as e:
-            return False, f"Erreur lors de la fusion : {str(e)}"
+            return False, f"Erreur lors de la fusion : {e!s}"
 
     def create_weekly_tournament(self, name, description, max_players, event_date, tournament_type="par_coup"):
         try:
@@ -664,7 +665,7 @@ class DBManager:
                 .execute()
             )
             return res.data if res.data else []
-        except Exception as e:
+        except Exception:
             return []
 
     def register_weekly(self, tournament_id, user_id):
@@ -699,7 +700,7 @@ class DBManager:
                     except:
                         pass # Ignore si le score existe déjà par sécurité
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def unregister_weekly(self, tournament_id, user_id):
@@ -743,7 +744,7 @@ class DBManager:
             else:
                 self.supabase.table("weekly_participants").delete().eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
             return True
-        except Exception as e:
+        except Exception:
             return False
     
     def get_user_gt_stats(self, user_id):
@@ -759,7 +760,7 @@ class DBManager:
                 .execute()
             )
             return res.data if res.data else []
-        except Exception as e:
+        except Exception:
             return []
 
     def get_user_weekly_stats(self, user_id):
@@ -773,7 +774,7 @@ class DBManager:
                 .execute()
             )
             return res.data if res.data else []
-        except Exception as e:
+        except Exception:
             return []
 
     def calculate_and_save_final_rankings(self, tournament_id, t_format):
@@ -967,7 +968,7 @@ class DBManager:
         try:
             res = self.supabase.table("trainings").select("*").eq("status", "active").order("created_at", desc=True).limit(1).execute()
             return res.data[0] if res.data else None
-        except Exception as e:
+        except Exception:
             return None
 
     def get_training_participants(self, training_id):
@@ -981,7 +982,7 @@ class DBManager:
                 .execute()
             )
             return res.data if res.data else []
-        except Exception as e:
+        except Exception:
             return []
 
     def register_training(self, training_id, user_id):
@@ -992,7 +993,7 @@ class DBManager:
                 "user_id": user_id
             }).execute()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def unregister_training(self, training_id, user_id):
@@ -1000,7 +1001,7 @@ class DBManager:
         try:
             self.supabase.table("training_participants").delete().eq("training_id", training_id).eq("user_id", user_id).execute()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def admin_remove_training_participant(self, training_id, user_id):
@@ -1008,7 +1009,7 @@ class DBManager:
         try:
             self.supabase.table("training_participants").delete().eq("training_id", training_id).eq("user_id", user_id).execute()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def close_training(self, training_id):
@@ -1113,7 +1114,7 @@ class DBManager:
             # On cherche tous les tournois avec le statut "completed", triés du plus récent au plus ancien
             res = self.supabase.table("weekly_tournaments").select("*").eq("status", "closed").order("event_date", desc=True).execute()
             return res.data if res.data else []
-        except Exception as e:
+        except Exception:
             return []
 
 
@@ -1202,7 +1203,7 @@ class DBManager:
 
             return True, f"Saison {season_name} clôturée avec succès ({mode}) !"
         except Exception as e:
-            return False, f"Erreur lors de la clôture : {str(e)}"
+            return False, f"Erreur lors de la clôture : {e!s}"
 
     def get_weekly_scores(self, tournament_id):
         """Récupère tous les scores d'un tournoi"""

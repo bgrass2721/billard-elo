@@ -1,14 +1,15 @@
-import streamlit as st
-from DB_manager import DBManager
-import pandas as pd
-import extra_streamlit_components as stx
-from elo_engine import EloEngine
-import altair as alt
 from datetime import datetime
-import pytz
-from ranks_config import RANK_TIERS
-import textwrap
+
+import altair as alt
+import extra_streamlit_components as stx
+import pandas as pd
+import streamlit as st
+
 from badges_config import BADGES_B64  # <-- Ajout de cette ligne
+from DB_manager import DBManager
+from elo_engine import EloEngine
+from ranks_config import RANK_TIERS
+from frontend.styles.style import set_style
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
@@ -17,93 +18,12 @@ SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
 # 🎨 CHIRURGIE ESTHÉTIQUE DE L'APPLICATION
 # ==========================================
 import streamlit as st
-import pandas as pd
 
 # 1. Configuration de la page (Doit être en tout premier)
 # (Pense à supprimer tes anciens appels st.set_page_config s'ils existent déjà).
 st.set_page_config(page_title="Snook'R Club", page_icon="🎱", layout="wide")
 
-st.markdown("""
-<style>
-    /* Importation des polices Google : Montserrat (texte) et Playfair Display (titres) */
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&family=Playfair+Display:wght@700&display=swap');
-    
-    /* On force la police de texte propre partout */
-    html, body, [class*="css"] {
-        font-family: 'Montserrat', sans-serif !important;
-    }
-    
-    /* On donne la police "Héraldique/Classe" à tous les grands titres de l'app */
-    h1, h2, h3 {
-        font-family: 'Playfair Display', serif !important;
-    }
-
-    /* Le style spécifique pour le gros logo en haut à gauche */
-    .sidebar-logo-text {
-        font-family: 'Playfair Display', serif;
-        color: #C69C25; /* Couleur Or */
-        font-size: 2.8em;
-        text-align: center;
-        margin-top: 0px;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-
-    /* 1. Style des options de navigation dans la barre latérale */
-    div[data-testid="stSidebarNav"] {
-        padding-top: 2rem;
-    }
-
-    /* Rendre les boutons radio invisibles mais styliser les labels */
-    div[data-testid="stSidebar"] .stRadio > div {
-        background-color: transparent;
-        padding: 0;
-    }
-
-    div[data-testid="stSidebar"] .stRadio label {
-        background-color: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(198, 156, 37, 0.1);
-        border-radius: 8px;
-        padding: 10px 15px !important;
-        margin-bottom: 8px;
-        transition: all 0.3s ease;
-        color: #F8F9FA !important;
-        width: 100%;
-    }
-
-    /* Effet au survol */
-    div[data-testid="stSidebar"] .stRadio label:hover {
-        background-color: rgba(198, 156, 37, 0.1);
-        border-color: #C69C25;
-        transform: translateX(5px);
-    }
-
-    /* Style de l'option sélectionnée */
-    div[data-testid="stSidebar"] .stRadio div[data-checked="true"] label {
-        background: linear-gradient(90deg, rgba(198, 156, 37, 0.2) 0%, rgba(198, 156, 37, 0) 100%) !important;
-        border-left: 5px solid #C69C25 !important;
-        border-color: #C69C25;
-        color: #C69C25 !important;
-        font-weight: 600 !important;
-    }
-
-    /* Masquer le petit cercle radio original */
-    div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] [data-testid="stWidgetLabel"] + div {
-        display: none;
-    }
-    
-    /* 2. Style spécial pour le bouton déconnexion */
-    .stSidebar [data-testid="stButton"] button {
-        background-color: transparent;
-        border: 1px solid #ff4b4b;
-        color: #ff4b4b;
-        transition: all 0.3s;
-    }
-    .stSidebar [data-testid="stButton"] button:hover {
-        background-color: #ff4b4b;
-        color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(set_style, unsafe_allow_html=True)
 
 def render_xp_bar(old_elo, new_elo, old_rank_info, new_rank_info):
     """Génère la carte d'XP avec le buffer de survie et remplissage dynamique post-transition."""
@@ -3017,7 +2937,7 @@ elif page == "🏟️ Grand Tournoi":
                                             match_html += f"<div style='flex: 1; text-align: left; font-weight: 600;'>{p2_name}</div>"
                                         else:
                                             match_html += f"<div style='flex: 1; text-align: right; font-weight: 600; opacity: 0.7;'>{p1_name}</div>"
-                                            match_html += f"<div style='flex: 0 0 80px; text-align: center; color: #555; font-size: 0.9em; font-style: italic;'>vs ⏳</div>"
+                                            match_html += "<div style='flex: 0 0 80px; text-align: center; color: #555; font-size: 0.9em; font-style: italic;'>vs ⏳</div>"
                                             match_html += f"<div style='flex: 1; text-align: left; font-weight: 600; opacity: 0.7;'>{p2_name}</div>"
                                             
                                         match_html += "</div>"
@@ -3151,12 +3071,12 @@ elif page == "🏟️ Grand Tournoi":
                             html += "<div style='display: flex; flex-direction: column; justify-content: center; flex: 0 0 220px; margin: 0 10px; gap: 40px;'>"
                             
                             html += "<div>"
-                            html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
+                            html += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
                             html += get_match_card(total_rounds_wb, 1, is_gf=True)
                             html += "</div>"
                             
                             html += "<div>"
-                            html += f"<div style='text-align: center; color: #CD7F32; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>🥉 Petite Finale</div>"
+                            html += "<div style='text-align: center; color: #CD7F32; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>🥉 Petite Finale</div>"
                             html += get_match_card(total_rounds_wb, 2, is_gf=False, is_pf=True)
                             html += "</div>"
                             
@@ -3318,7 +3238,7 @@ elif page == "🏟️ Grand Tournoi":
                         key = f"draft_{selected_t['id']}_{g}"
                         
                         available_players = [
-                            p for p in user_options.keys() 
+                            p for p in user_options 
                             if p not in all_selected_players or p in st.session_state[key]
                         ]
                         
@@ -3581,9 +3501,9 @@ elif page == "🏟️ Grand Tournoi":
                             
                             # 2. CENTRE
                             html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 140px; margin: 0 15px;'>"
-                            html_map += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px;'>👑 Finale</div>"
+                            html_map += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px;'>👑 Finale</div>"
                             html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
-                            html_map += f"<div style='background-color: rgba(255,215,0,0.1); border: 1px solid gold; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: white; font-size: 14px;'>Match 1</strong></div>"
+                            html_map += "<div style='background-color: rgba(255,215,0,0.1); border: 1px solid gold; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: white; font-size: 14px;'>Match 1</strong></div>"
                             html_map += "</div></div>"
 
                             # 3. DROITE
@@ -3778,7 +3698,7 @@ elif page == "🏟️ Grand Tournoi":
                                     html += "</div>"
                                     
                                     html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin: 0 10px;'>"
-                                    html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
+                                    html += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
                                     html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                     html += get_match_card_admin(total_rounds_wb, 1, is_gf=True)
                                     html += "</div></div>"
@@ -4244,7 +4164,7 @@ elif page == "🍻 Weekly Fun":
                     st.write("")
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
-                        if st.button(f"⏭️ Valider et Passer au Coup Suivant", type="primary", use_container_width=True):
+                        if st.button("⏭️ Valider et Passer au Coup Suivant", type="primary", use_container_width=True):
                             auto_inputs = {p["user_id"]: st.session_state.get(f"s_{p['user_id']}_{current_shot}", -1) for p in active_players}
                             db.save_weekly_shot_scores(current_weekly['id'], current_shot, auto_inputs)
                             db.next_weekly_shot(current_weekly['id'], current_shot)
@@ -4523,7 +4443,7 @@ elif page == "🍻 Weekly Fun":
                 sorted_board = sorted(list(board.values()), key=lambda x: x["Total"], reverse=True)
                 current_rank = 1
                 for i, row in enumerate(sorted_board):
-                    if i > 0 and sorted_board[i]["Total"] == sorted_board[i-1]["Total"]: row["Rang"] = current_rank
+                    if i > 0 and row["Total"] == sorted_board[i-1]["Total"]: row["Rang"] = current_rank
                     else: current_rank = i + 1; row["Rang"] = current_rank
                 
                 df_cols = ["Rang", "Joueur", "Total"] + [f"Coup {s}" for s in range(1, max_shot + 1)]
@@ -4598,7 +4518,7 @@ elif page == "🍻 Weekly Fun":
                     # --- B. CENTRE (GRANDE FINALE) ---
                     html += "<div style='display: flex; flex-direction: column; justify-content: center; flex: 0 0 220px; margin: 0 10px; gap: 40px;'>"
                     html += "<div>"
-                    html += f"<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
+                    html += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
                     html += get_match_card_weekly_archive(total_rounds_wb, 1)
                     html += "</div>"
                     html += "</div>"
