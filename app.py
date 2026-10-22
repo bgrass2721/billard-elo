@@ -8,10 +8,10 @@ import streamlit as st
 from badges_config import BADGES_B64  # <-- Ajout de cette ligne
 from DB_manager import DBManager
 from elo_engine import EloEngine
-from ranks_config import RANK_TIERS
+from frontend.styles.maj_260122 import st_maj260122
 from frontend.styles.style import set_style
 from frontend.styles.style_2 import set_style_2
-from frontend.styles.maj_260122 import st_maj260122
+from ranks_config import RANK_TIERS
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
