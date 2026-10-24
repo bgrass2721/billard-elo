@@ -54,3 +54,5 @@ Le système utilise un calcul Elo dynamique :
 
 ## 👨‍💻 Auteur
 Développé par **Benjamin GRASS**.
+
+[REVIEW en cours. Des perturbations peuvent se présenter]
