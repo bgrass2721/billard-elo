@@ -1661,7 +1661,7 @@ elif page == "📜 Règlement":
     st.write("Script exécuté :", Path(__file__).resolve())
     st.write("Dossier courant :", Path.cwd())
     st.write("Page présente :", (Path(__file__).parent / "pages" / "reglement.py").exists())
-    st.switch_page("pages/reglement.py")
+    st.switch_page("pages/classement.py")
 
 elif page == "🔧 Panel Admin":
     st.header("🔧 Outils d'administration")
