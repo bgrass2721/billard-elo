@@ -1656,7 +1656,7 @@ elif page == "📢 Nouveautés":
         st.markdown(st_maj260122)
 
 elif page == "📜 Règlement":
-    st.switch_page("frontend/src/pages/reglement.py")
+    st.switch_page("pages/reglement.py")
 
 elif page == "🔧 Panel Admin":
     st.header("🔧 Outils d'administration")
