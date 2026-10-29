@@ -1656,6 +1656,11 @@ elif page == "📢 Nouveautés":
         st.markdown(st_maj260122)
 
 elif page == "📜 Règlement":
+    from pathlib import Path
+    st.write("Version Streamlit :", st.__version__)
+    st.write("Script exécuté :", Path(__file__).resolve())
+    st.write("Dossier courant :", Path.cwd())
+    st.write("Page présente :", (Path(__file__).parent / "pages" / "reglement.py").exists())
     st.switch_page("pages/reglement.py")
 
 elif page == "🔧 Panel Admin":
