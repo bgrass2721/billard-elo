@@ -143,13 +143,22 @@ def get_badges_html(player, matches_history):
             css_class = "locked"
 
         # 🔴 NOUVEAU DESIGN : Pas de cadre, juste lueur & image plus grosse
-        badge_html = f'''<div class="badge-item {css_class}" style="position: relative; display: flex; flex-direction: column; align-items: center; margin: 10px; width: 80px;">
-    <div style="width: 70px; height: 70px; display: flex; justify-content: center; align-items: center; position: relative;">
-        <img src="{clean_url}" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />
-    </div>
-    <div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; color: {color if style != 'locked' else '#888'}; text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); text-align: center;">{name}</div>
-    <span class="tooltip-content">{tooltip_text}</span>
-</div>'''
+        badge_html = (
+            f'<div class="badge-item {css_class}" '
+            'style="position: relative; display: flex; flex-direction: column; '
+            'align-items: center; margin: 10px; width: 80px;">'
+            '<div style="width: 70px; height: 70px; display: flex; '
+            'justify-content: center; align-items: center; position: relative;">'
+            f'<img src="{clean_url}" style="width: 70px; height: 70px; '
+            f'object-fit: contain; filter: drop-shadow(0 0 8px {color});" />'
+            '</div>'
+            f'<div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; '
+            f'color: {color if style != "locked" else "#888"}; '
+            'text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); '
+            f'text-align: center;">{name}</div>'
+            f'<span class="tooltip-content">{tooltip_text}</span>'
+            '</div>'
+        )
         html_parts.append(badge_html)
 
     def add_special(cond, style, image_url, name, desc, current_stat=""):
