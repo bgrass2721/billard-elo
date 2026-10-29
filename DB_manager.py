@@ -107,7 +107,7 @@ class DBManager:
                 return False, "Le match n'est pas dans un état permettant la révocation."
 
             mode = match.get("mode", "1v1")
-            
+
             # Récupération asymétrique (Si elo_loss n'existe pas sur les vieux matchs, on utilise elo_gain par défaut)
             gain = match.get("elo_gain", 0)
             loss = match.get("elo_loss", gain)
@@ -133,7 +133,7 @@ class DBManager:
             elif mode == "2v2":
                 winners = [match["winner_id"], match["winner2_id"]]
                 losers = [match["loser_id"], match["loser2_id"]]
-                
+
                 profiles_res = self.supabase.table("profiles").select("*").in_("id", winners + losers).execute()
                 p_map = {p["id"]: p for p in profiles_res.data}
 
@@ -155,7 +155,7 @@ class DBManager:
 
             self.supabase.table("matches").update({"status": "revoked"}).eq("id", match_id).execute()
             return True, "Match révoqué et scores rétablis."
-            
+
         except Exception as e:
             return False, f"Erreur lors de la révocation : {e!s}"
 
@@ -798,16 +798,16 @@ class DBManager:
 
             # Dictionnaire pour stocker le rang final de chacun: {user_id: rank}
             final_ranks = {}
-            
+
             # --- PHASE DE POULES (Traitement commun) ---
             # On identifie d'abord les éliminés en phase de poules
             group_matches = [m for m in matches if m["phase"] == "group"]
             group_letters = set([m["group_name"] for m in group_matches if m["group_name"]])
-            
+
             for g in group_letters:
                 g_parts = [p for p in participants if p["group_name"] == g]
                 g_m = [m for m in group_matches if m["group_name"] == g]
-                
+
                 # Recalcul rapide du classement de la poule
                 standings = {p["user_id"]: {"V": 0, "Diff": 0} for p in g_parts}
                 for m in g_m:
@@ -817,51 +817,55 @@ class DBManager:
                         standings[w_id]["Diff"] += (m["score1"] - m["score2"] if m["player1_id"] == w_id else m["score2"] - m["score1"])
                     if l_id and l_id in standings:
                         standings[l_id]["Diff"] += (m["score1"] - m["score2"] if m["player1_id"] == l_id else m["score2"] - m["score1"])
-                
+
                 sorted_g = sorted(standings.keys(), key=lambda uid: (standings[uid]["V"], standings[uid]["Diff"]), reverse=True)
-                
+
                 # Seuls les 2 premiers passent (normalement). Les autres sont classés.
                 if len(sorted_g) >= 3:
-                    final_ranks[sorted_g[2]] = 33 # 3ème de poule
+                    final_ranks[sorted_g[2]] = 33  # 3ème de poule
                 if len(sorted_g) >= 4:
-                    final_ranks[sorted_g[3]] = 49 # 4ème de poule
+                    final_ranks[sorted_g[3]] = 49  # 4ème de poule
                 # S'il y a un 5e ou 6e, tu pourrais ajouter 65, etc.
 
             # --- PHASE D'ARBRE (Bracket) ---
             bracket_matches = [m for m in matches if m["phase"] == "bracket"]
-            
+
             is_double = "double" in t_format
-            
-            # --- LOGIQUE SIMPLE ÉLIMINATION ---
+
             # --- LOGIQUE SIMPLE ÉLIMINATION ---
             if not is_double:
                 wb_matches = [m for m in matches if m.get("bracket_match_id") and m["bracket_match_id"].startswith("WB_")]
                 if not wb_matches: return False, "Erreur structurelle de l'arbre WB."
-                
+
                 max_r_str = max([m["bracket_match_id"].split("_")[1] for m in wb_matches])
                 max_r = int(max_r_str[1:]) # Numéro du round final
-                
+
                 # NOUVEAU : On trie les matchs pour lire la Finale EN PREMIER
                 wb_matches = sorted(wb_matches, key=lambda x: int(x["bracket_match_id"].split("_")[1][1:]), reverse=True)
-                
+
                 for m in wb_matches:
                     parts = m["bracket_match_id"].split("_")
                     current_r = int(parts[1][1:])
                     m_num = int(parts[2][1:])
-                    
+
                     w_id, l_id = m["winner_id"], m["loser_id"]
-                    
-                    if not l_id: continue # Gestion BYE ou match non fini
+
+                    if not l_id:
+                        continue  # Gestion BYE ou match non fini
 
                     if current_r == max_r:
                         if m_num == 1:
                             # C'est la GRANDE FINALE (M1)
-                            if w_id and w_id not in final_ranks: final_ranks[w_id] = 1 # Or
-                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 2 # Argent
+                            if w_id and w_id not in final_ranks:
+                                final_ranks[w_id] = 1  # Or
+                            if l_id and l_id not in final_ranks:
+                                final_ranks[l_id] = 2  # Argent
                         elif m_num == 2:
                             # C'est la PETITE FINALE (M2)
-                            if w_id and w_id not in final_ranks: final_ranks[w_id] = 3 # Bronze
-                            if l_id and l_id not in final_ranks: final_ranks[l_id] = 4 # Chocolat
+                            if w_id and w_id not in final_ranks:
+                                final_ranks[w_id] = 3  # Bronze
+                            if l_id and l_id not in final_ranks:
+                                final_ranks[l_id] = 4  # Chocolat
                             
                     else:
                         # PROTECTION : On n'écrase pas une place déjà donnée par une finale !
@@ -880,7 +884,7 @@ class DBManager:
                 # La Grande Finale (Grand Final) décide du 1er et 2e
                 gf_match = next((m for m in bracket_matches if m["bracket_match_id"] == "GF"), None)
                 gf_reset = next((m for m in bracket_matches if m["bracket_match_id"] == "GF_RESET"), None)
-                
+
                 # Le gagnant final
                 if gf_reset and gf_reset["winner_id"]:
                     final_ranks[gf_reset["winner_id"]] = 1
@@ -890,48 +894,57 @@ class DBManager:
                     if not gf_reset:
                         final_ranks[gf_match["winner_id"]] = 1
                         final_ranks[gf_match["loser_id"]] = 2
-                
+
                 # Finale du Loser Bracket (LB_Final) = 3ème
                 lb_matches = [m for m in bracket_matches if m["bracket_match_id"] and m["bracket_match_id"].startswith("LB_")]
                 if lb_matches:
                     max_lb_r = max([int(m["bracket_match_id"].split("_")[1][1:]) for m in lb_matches])
-                    
+
                     for m in lb_matches:
                         r_num = int(m["bracket_match_id"].split("_")[1][1:])
                         l_id = m["loser_id"]
-                        
-                        if not l_id or l_id in final_ranks: continue # Déjà classé (1er ou 2e)
-                        
-                        if r_num == max_lb_r: final_ranks[l_id] = 3 # Perdant Finale LB = 3ème
-                        elif r_num == max_lb_r - 1: final_ranks[l_id] = 4 # Perdant Demie LB = 4ème
-                        elif r_num == max_lb_r - 2: final_ranks[l_id] = 5 # Top 5
-                        elif r_num == max_lb_r - 3: final_ranks[l_id] = 7 # Top 7
-                        elif r_num == max_lb_r - 4: final_ranks[l_id] = 9 # Top 9
-                        elif r_num == max_lb_r - 5: final_ranks[l_id] = 13 # Top 13
-                        elif r_num == max_lb_r - 6: final_ranks[l_id] = 17 # Top 17
-                        elif r_num == max_lb_r - 7: final_ranks[l_id] = 25 # Top 25
+
+                        if not l_id or l_id in final_ranks:
+                            continue  # Déjà classé (1er ou 2e)
+
+                        rank_by_offset = {
+                            0: 3,   # Perdant finale LB
+                            1: 4,   # Perdant demie LB
+                            2: 5,   # Top 5
+                            3: 7,   # Top 7
+                            4: 9,   # Top 9
+                            5: 13,  # Top 13
+                            6: 17,  # Top 17
+                            7: 25,  # Top 25
+                        }
+
+                        offset = max_lb_r - r_num
+
+                        if offset in rank_by_offset:
+                            final_ranks[l_id] = rank_by_offset[offset]
                         # Et ainsi de suite selon la taille du tournoi...
 
-           # 3. Enregistrement en base de données + Distribution des Titres
+            # 3. Enregistrement en base de données + Distribution des Titres
             for uid, rank in final_ranks.items():
                 # On met à jour le rang dans la table des participants
                 self.supabase.table("gt_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
-                
+
                 # --- DISTRIBUTION DES TITRES (Top 3) ---
                 if rank in [1, 2, 3]:
                     # On récupère le profil pour avoir ses titres actuels
                     p_res = self.supabase.table("profiles").select("unlocked_titles").eq("id", uid).single().execute()
                     titles = p_res.data.get("unlocked_titles", []) if p_res.data else []
-                    if titles is None: titles = []
-                    
+                    if titles is None:
+                        titles = []
+
                     # On définit le nom du titre selon la place
                     t_data = self.supabase.table("grand_tournaments").select("name").eq("id", tournament_id).single().execute().data
                     t_name = t_data["name"] if t_data else "Grand Tournoi"
-                    
+
                     emoji = "🏆" if rank == 1 else "🥈" if rank == 2 else "🥉"
                     statut = "Vainqueur" if rank == 1 else "Finaliste" if rank == 2 else "Podium"
                     new_title = f"{emoji} {statut} {t_name}"
-                    
+
                     if new_title not in titles:
                         titles.append(new_title)
                         self.supabase.table("profiles").update({"unlocked_titles": titles}).eq("id", uid).execute()
@@ -940,7 +953,7 @@ class DBManager:
             self.supabase.table("grand_tournaments").update({"status": "completed"}).eq("id", tournament_id).execute()
 
             return True, "Tournoi clôturé et classements générés avec succès !"
-            
+
         except Exception as e:
             return False, f"Erreur lors du calcul des classements : {e}"
 
@@ -1029,64 +1042,69 @@ class DBManager:
             # 1. On récupère tous les matchs de cette poule spécifique
             res = self.supabase.table("gt_matches").select("*").eq("tournament_id", tournament_id).eq("group_name", group_name).execute()
             matches = res.data if res.data else []
-            
-            if not matches: return False, "Aucun match."
-            
+
+            if not matches:
+                return False, "Aucun match."
+
             # 2. Quel est le round actuel ? (0 = régulier, 1 = barrage #1, 2 = barrage #2...)
             current_round = max([m.get("tie_break_round", 0) for m in matches])
             current_matches = [m for m in matches if m.get("tie_break_round", 0) == current_round]
-            
+
             # Si le round actuel n'est pas fini, on ne déclenche pas l'arbitre
             if any(m["status"] != "completed" for m in current_matches):
                 return False, "Matchs en cours."
-                
+
             # 3. Calcul du classement (uniquement sur le round actuel)
             players_in_round = set()
             for m in current_matches:
-                if m["player1_id"]: players_in_round.add(m["player1_id"])
-                if m["player2_id"]: players_in_round.add(m["player2_id"])
-                
+                if m["player1_id"]:
+                    players_in_round.add(m["player1_id"])
+                if m["player2_id"]:
+                    players_in_round.add(m["player2_id"])
+
             standings = {uid: {"V": 0, "Diff": 0} for uid in players_in_round}
             for m in current_matches:
                 p1, p2 = m["player1_id"], m["player2_id"]
                 s1, s2 = m["score1"], m["score2"]
                 if p1 and p2:
-                    if s1 > s2: standings[p1]["V"] += 1
-                    elif s2 > s1: standings[p2]["V"] += 1
+                    if s1 > s2:
+                        standings[p1]["V"] += 1
+                    elif s2 > s1:
+                        standings[p2]["V"] += 1
                     standings[p1]["Diff"] += (s1 - s2)
                     standings[p2]["Diff"] += (s2 - s1)
-                    
+
             # 4. Tri des joueurs selon leurs scores
             sorted_uids = sorted(standings.keys(), key=lambda x: (standings[x]["V"], standings[x]["Diff"]), reverse=True)
-            
+
             # On regroupe ceux qui ont EXACTEMENT le même score (V et Diff)
             score_groups = {}
             for uid in sorted_uids:
                 score = (standings[uid]["V"], standings[uid]["Diff"])
-                if score not in score_groups: score_groups[score] = []
+                if score not in score_groups:
+                    score_groups[score] = []
                 score_groups[score].append(uid)
-                
+
             # 5. Détection des égalités critiques (Top 1 et Top 2)
             players_to_tie_break = []
             current_rank = 1
-            
+
             for score, uids in score_groups.items():
                 nb_tied = len(uids)
-                if nb_tied > 1:
-                    # Si l'égalité touche la 1ère ou la 2ème place, BARRAGE !
-                    if current_rank <= 2:
-                        players_to_tie_break.extend(uids)
+                # Si l'égalité touche la 1ère ou la 2ème place, BARRAGE !
+                if nb_tied > 1 and current_rank <= 2:
+                    players_to_tie_break.extend(uids)
                 current_rank += nb_tied
-                
+
             # S'il n'y a pas d'égalité critique, la poule est validée !
             if not players_to_tie_break:
                 return True, "Poule validée ! Aucun barrage nécessaire."
-                
+
             # 6. Création de la mini-poule de barrage (Round + 1)
             next_round = current_round + 1
             import itertools
             new_matches = []
-            
+
             # Chaque joueur à égalité va affronter les autres
             for p1, p2 in itertools.combinations(players_to_tie_break, 2):
                 new_matches.append({
@@ -1100,11 +1118,11 @@ class DBManager:
                     "score2": 0,
                     "tie_break_round": next_round
                 })
-                
+
             if new_matches:
                 self.supabase.table("gt_matches").insert(new_matches).execute()
                 return True, f"🚨 Égalité critique détectée ! Matchs de Barrage #{next_round} générés."
-                
+
         except Exception as e:
             return False, f"Erreur de l'arbitre : {e}"
 
@@ -1117,7 +1135,6 @@ class DBManager:
         except Exception:
             return []
 
-
     def close_season_logic(self, season_name, mode="1v1"):
         """
         Archive le classement, distribue les titres (Champion, Dauphin, Rangs), 
@@ -1126,19 +1143,20 @@ class DBManager:
         try:
             res = self.get_leaderboard(mode=mode)
             players = res.data if res.data else []
-            if not players: return False, "Aucun joueur à archiver."
+            if not players:
+                return False, "Aucun joueur à archiver."
 
             target_elo_col = "elo_rating" if mode == "1v1" else "elo_2v2"
             target_match_col = "matches_played" if mode == "1v1" else "matches_2v2"
             archives_to_insert = []
-            
+
             # --- NOUVEAU : Détermination du label du mode ---
             mode_label = "Solo" if mode == "1v1" else "Duo"
-            
+
             for i, p in enumerate(players):
                 current_elo = p.get(target_elo_col, 1000)
                 matches_played = p.get(target_match_col, 0)
-                
+
                 # 1. Sauvegarde dans l'archive
                 archives_to_insert.append({
                     "season_name": season_name,
@@ -1149,10 +1167,10 @@ class DBManager:
                     "final_rank": i + 1,
                     "mode": mode
                 })
-                
+
                 # 2. Soft Reset
                 new_elo = 1000 + (current_elo - 1000) * 0.4 if current_elo > 1000 else 1000
-                
+
                 # 3. Mise à jour du profil (Remise à 0 des matchs)
                 update_data = {
                     target_elo_col: int(new_elo),
@@ -1164,11 +1182,12 @@ class DBManager:
                 else:
                     update_data["current_rank_id_2v2"] = 1
                     update_data["last_seen_elo_2v2"] = int(new_elo)
-                
+
                 # 4. DISTRIBUTION DES NOUVEAUX TITRES (Sans émojis)
                 titles = p.get("unlocked_titles", [])
-                if titles is None: titles = []
-                
+                if titles is None:
+                    titles = []
+
                 # Titre de Rang
                 if matches_played > 1:
                     rank_name = "Novice"
@@ -1177,24 +1196,28 @@ class DBManager:
                             rank_name = tier["name"]
                             break
                     rank_title = f"{rank_name} {mode_label} {season_name}"
-                    if rank_title not in titles: titles.append(rank_title)
+                    if rank_title not in titles:
+                        titles.append(rank_title)
 
                 # Titres de Podium
                 if i == 0:
                     champ_title = f"Champion {mode_label} de {season_name}"
-                    if champ_title not in titles: titles.append(champ_title)
+                    if champ_title not in titles:
+                        titles.append(champ_title)
                 elif i == 1:
                     dauphin_title = f"Dauphin {mode_label} de {season_name}"
-                    if dauphin_title not in titles: titles.append(dauphin_title)
+                    if dauphin_title not in titles:
+                        titles.append(dauphin_title)
                 elif i == 2:
                     podium_title = f"3ème {mode_label} de {season_name}"
-                    if podium_title not in titles: titles.append(podium_title)
+                    if podium_title not in titles:
+                        titles.append(podium_title)
 
                 update_data["unlocked_titles"] = titles
                 self.supabase.table("profiles").update(update_data).eq("id", p["id"]).execute()
 
             self.supabase.table("season_archives").insert(archives_to_insert).execute()
-            
+
             # 5. ARCHIVAGE DES MATCHS
             self.supabase.table("matches").update({
                 "status": "archived",
@@ -1233,7 +1256,7 @@ class DBManager:
         """Passe au coup suivant et gère les joueurs inactifs (abandon ou partis)"""
         try:
             self.supabase.table("weekly_tournaments").update({"current_shot": current_shot + 1}).eq("id", tournament_id).execute()
-            
+
             # Les inactifs reçoivent un 0 automatique et un trait "-" (is_absent=True)
             inactifs = self.supabase.table("weekly_participants").select("user_id").eq("tournament_id", tournament_id).eq("is_active", False).execute()
             for row in inactifs.data:
@@ -1256,16 +1279,16 @@ class DBManager:
         try:
             # 1. Récupérer tous les scores
             scores_data = self.supabase.table("weekly_scores").select("user_id, score").eq("tournament_id", tournament_id).execute().data
-            
+
             # 2. Additionner le total par joueur
             totals = {}
             for row in scores_data:
                 uid = row["user_id"]
                 totals[uid] = totals.get(uid, 0) + row["score"]
-                
+
             # 3. Trier du plus grand au plus petit score
             sorted_players = sorted(totals.items(), key=lambda x: x[1], reverse=True)
-            
+
             # 4. Magie des ex-aequo (1er, 1er, 3ème...)
             rank_updates = {}
             current_rank = 1
@@ -1275,14 +1298,14 @@ class DBManager:
                 else:
                     current_rank = i + 1
                     rank_updates[sorted_players[i][0]] = current_rank
-            
+
             # 5. Enregistrer les rangs
             for uid, rank in rank_updates.items():
                 self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", uid).execute()
-                
+
             # 6. Clôturer officiellement
             self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
-            
+
             return True, "🏁 Tournoi clôturé ! Les rangs et ex-aequo ont été attribués automatiquement."
         except Exception as e:
             return False, f"Erreur lors de la clôture : {e}"
@@ -1323,19 +1346,19 @@ class DBManager:
                             "bracket_match_id": f"WB_R{r}_M{m}",
                             "status": "pending"
                         }
-                        
+
                         if r == 1:
                             p1 = match_slots[m-1]["player1_id"]
                             p2 = match_slots[m-1]["player2_id"]
                             match["player1_id"] = p1
                             match["player2_id"] = p2
-                            
+
                         bracket_data.append(match)
-                
+
                 self.supabase.table("weekly_matches").insert(bracket_data).execute()
 
             return True, "Le tournoi est lancé avec succès !"
-            
+
         except Exception as e:
             return False, f"Erreur : {e}"
 
@@ -1344,7 +1367,7 @@ class DBManager:
         try:
             # On récupère les matchs en attente
             matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).eq("status", "pending").execute().data
-            
+
             for m in matches:
                 # 🛑 SÉCURITÉ ABSOLUE : On ne touche QU'AU TOUR 1 ! Les autres tours sont gérés par la cascade.
                 if not str(m.get("bracket_match_id", "")).startswith("WB_R1_"):
@@ -1352,11 +1375,11 @@ class DBManager:
 
                 p1 = m.get("player1_id")
                 p2 = m.get("player2_id")
-                
+
                 # Si c'est un match avec au moins un fantôme
                 if not p1 or not p2:
                     updates = {"status": "completed"}
-                    
+
                     if p1 and not p2:
                         updates["winner_id"] = p1
                         updates["score1"] = 1
@@ -1368,12 +1391,12 @@ class DBManager:
                     else:
                         # Fantôme vs Fantôme (0 joueur) -> On clôture juste le slot
                         pass
-                        
+
                     self.supabase.table("weekly_matches").update(updates).eq("id", m["id"]).execute()
-            
+
             # On lance la cascade qui va analyser le Tour 1 et faire avancer les vrais joueurs au Tour 2, 3, etc.
             self._propagate_weekly_byes(tournament_id)
-            
+
             return True, "✅ Les forfaits ont été validés proprement !"
         except Exception as e:
             return False, f"Erreur : {e}"
@@ -1386,7 +1409,7 @@ class DBManager:
             matches = self.supabase.table("weekly_matches").select("*").eq("tournament_id", tournament_id).execute().data
             if not matches: return
             m_dict = {m["bracket_match_id"]: m for m in matches}
-            
+
             for r in range(1, 5):
                 nb_matches = 16 // (2**r)
                 for m in range(1, nb_matches + 1):
@@ -1397,12 +1420,12 @@ class DBManager:
                     if curr["status"] == "pending" and r > 1:
                         p1_match = m_dict.get(f"WB_R{r-1}_M{(m*2)-1}")
                         p2_match = m_dict.get(f"WB_R{r-1}_M{m*2}")
-                        
+
                         if p1_match and p2_match and p1_match["status"] == "completed" and p2_match["status"] == "completed":
                             p1_w = p1_match.get("winner_id")
                             p2_w = p2_match.get("winner_id")
                             updates = {"player1_id": p1_w, "player2_id": p2_w}
-                            
+
                             if p1_w and not p2_w:
                                 updates["winner_id"] = p1_w
                                 updates["score1"] = 1
@@ -1415,16 +1438,16 @@ class DBManager:
                                 updates["status"] = "completed"
                             elif not p1_w and not p2_w:
                                 updates["status"] = "completed"
-                                
+
                             if any(curr.get(k) != v for k, v in updates.items()):
                                 self.supabase.table("weekly_matches").update(updates).eq("id", curr["id"]).execute()
                                 curr.update(updates)
-                                
+ 
                     # 2. Push direct au tour suivant classique
                     if r < 4 and curr["status"] == "completed" and curr.get("winner_id"):
                         next_r, next_m = r + 1, math.ceil(m / 2)
                         next_match = m_dict.get(f"WB_R{next_r}_M{next_m}")
-                        
+
                         if next_match and next_match["status"] == "pending":
                             col = "player1_id" if (m % 2 != 0) else "player2_id"
                             if next_match.get(col) != curr["winner_id"]:
@@ -1437,13 +1460,13 @@ class DBManager:
             self.supabase.table("weekly_matches").update({
                 "score1": score1, "score2": score2, "winner_id": winner_id, "status": "completed"
             }).eq("id", match_id).execute()
-            
+
             # On relance l'auto-résolution après chaque validation de l'admin !
             self._propagate_weekly_byes(tournament_id)
             return True, "Match mis à jour !"
         except Exception as e:
             return False, str(e)
-    
+
     def close_weekly_bracket(self, tournament_id):
         """Clôture un tournoi Weekly Fun (Arbre) et calcule les rangs exacts (1, 2, 3, 5, 9)"""
         try:
@@ -1457,36 +1480,36 @@ class DBManager:
             # Tour 3 (Demis) -> Perdants = 3ème
             # Tour 2 (Quarts) -> Perdants = 5ème
             # Tour 1 (Huitièmes) -> Perdants = 9ème
-            
+
             for m in matches:
                 if m["status"] != "completed":
                     continue
-                
+
                 r_num = int(m["bracket_match_id"].split("_")[1].replace("R", ""))
                 p1 = m.get("player1_id")
                 p2 = m.get("player2_id")
                 winner = m.get("winner_id")
-                
+
                 loser = p1 if winner == p2 else p2
-                
+
                 # On attribue le rang au perdant s'il existe (ignore les fantômes / None)
                 if loser:
                     if r_num == 4: ranks[loser] = 2
                     elif r_num == 3: ranks[loser] = 3
                     elif r_num == 2: ranks[loser] = 5
                     elif r_num == 1: ranks[loser] = 9
-                
+
                 # Le grand gagnant est le vainqueur du Tour 4
                 if r_num == 4 and winner:
                     ranks[winner] = 1
-                    
+
             # 2. Sauvegarde des rangs pour chaque joueur en base de données
             for user_id, rank in ranks.items():
                 self.supabase.table("weekly_participants").update({"final_rank": rank}).eq("tournament_id", tournament_id).eq("user_id", user_id).execute()
 
             # 3. Clôture finale du tournoi
             self.supabase.table("weekly_tournaments").update({"status": "closed"}).eq("id", tournament_id).execute()
-            
+
             return True, "Tournoi clôturé et classements exacts générés !"
         except Exception as e:
             return False, f"Erreur : {e}"
