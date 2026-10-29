@@ -1,23 +1,25 @@
-from datetime import datetime
-
-import altair as alt
 import extra_streamlit_components as stx
-import pandas as pd
 import streamlit as st
 
-from badges_config import BADGES_B64  # <-- Ajout de cette ligne
-from base_function_temp.draw_luxury_table import draw_luxury_table
-from base_function_temp.draw_rank_badge import draw_rank_badge
-from base_function_temp.get_badges_html import get_badges_html
 from base_function_temp.get_rank_info import get_rank_info
 from base_function_temp.render_xp_bar import render_xp_bar
 from DB_manager import DBManager
-from elo_engine import EloEngine
-from frontend.src.pages import classement, reglement, profils_joueurs, declarer_match, comparateur_joueurs, validations, nouveautes, panel_admin, grand_tournoi, parametres, weekly_fun, entrainements
-from frontend.styles.maj_260122 import st_maj260122
+from frontend.src.pages import (
+    classement,
+    comparateur_joueurs,
+    declarer_match,
+    entrainements,
+    grand_tournoi,
+    nouveautes,
+    panel_admin,
+    parametres,
+    profils_joueurs,
+    reglement,
+    validations,
+    weekly_fun,
+)
 from frontend.styles.style import set_style
 from frontend.styles.style_2 import set_style_2
-from ranks_config import RANK_TIERS
 
 # --- CONFIGURATION DU CODE SECRET ---
 SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
