@@ -481,7 +481,7 @@ elif page == "🔧 Panel Admin":
     panel_admin.afficher(db)
 
 elif page == "🏟️ Grand Tournoi":
-    grand_tournoi.afficher(user, db)
+    grand_tournoi.afficher(db, user)
 
 elif page == "⚙️ Paramètres":
     parametres.afficher(db, user)
