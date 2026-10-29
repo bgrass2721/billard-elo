@@ -13,6 +13,7 @@ from base_function_temp.get_rank_info import get_rank_info
 from base_function_temp.render_xp_bar import render_xp_bar
 from DB_manager import DBManager
 from elo_engine import EloEngine
+from frontend.src.pages import reglement
 from frontend.styles.maj_260122 import st_maj260122
 from frontend.styles.style import set_style
 from frontend.styles.style_2 import set_style_2
@@ -1656,12 +1657,7 @@ elif page == "📢 Nouveautés":
         st.markdown(st_maj260122)
 
 elif page == "📜 Règlement":
-    from pathlib import Path
-    st.write("Version Streamlit :", st.__version__)
-    st.write("Script exécuté :", Path(__file__).resolve())
-    st.write("Dossier courant :", Path.cwd())
-    st.write("Page présente :", (Path(__file__).parent / "pages" / "reglement.py").exists())
-    st.switch_page("pages/classement.py")
+    reglement.afficher()
 
 elif page == "🔧 Panel Admin":
     st.header("🔧 Outils d'administration")
