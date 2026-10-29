@@ -6,6 +6,11 @@ import pandas as pd
 import streamlit as st
 
 from badges_config import BADGES_B64  # <-- Ajout de cette ligne
+from base_function_temp.draw_luxury_table import draw_luxury_table
+from base_function_temp.draw_rank_badge import draw_rank_badge
+from base_function_temp.get_badges_html import get_badges_html
+from base_function_temp.get_rank_info import get_rank_info
+from base_function_temp.render_xp_bar import render_xp_bar
 from DB_manager import DBManager
 from elo_engine import EloEngine
 from frontend.styles.maj_260122 import st_maj260122
@@ -25,571 +30,6 @@ SECRET_INVITE_CODE = st.secrets["INVITE_CODE"]
 st.set_page_config(page_title="Snook'R Club", page_icon="🎱", layout="wide")
 
 st.markdown(set_style, unsafe_allow_html=True)
-
-
-def render_xp_bar(old_elo, new_elo, old_rank_info, new_rank_info):
-    """Génère la carte d'XP avec le buffer de survie et remplissage dynamique post-transition."""
-    is_promo = new_rank_info["id"] > old_rank_info["id"]
-    is_demote = new_rank_info["id"] < old_rank_info["id"]
-    is_same = not (is_promo or is_demote)
-
-    # Fonction utilitaire pour calculer le % d'une barre
-    def get_pct(val, min_v, max_v):
-        if max_v <= min_v: return 100
-        return max(0, min(100, ((val - min_v) / (max_v - min_v)) * 100))
-
-    # === 1. PARAMÈTRES NOUVEAU RANG ===
-    new_base_min = new_rank_info["threshold"]
-    new_next = next((t for t in RANK_TIERS if t["id"] == new_rank_info["id"] + 1), None)
-
-    new_display_min = (new_base_min - 25) if new_base_min >= 25 else 0
-    new_display_max = new_next["threshold"] if new_next else "MAX"
-    new_calc_max = new_display_min + 100 if new_display_max == "MAX" else new_display_max
-
-    is_in_danger = new_elo < new_base_min
-
-    # === 2. PARAMÈTRES ANCIEN RANG ===
-    old_base_min = old_rank_info["threshold"]
-    old_next = next((t for t in RANK_TIERS if t["id"] == old_rank_info["id"] + 1), None)
-    
-    old_display_min = (old_base_min - 25) if old_base_min >= 25 else 0
-    old_display_max = old_next["threshold"] if old_next else "MAX"
-    old_calc_max = old_display_min + 100 if old_display_max == "MAX" else old_display_max
-
-    # === 3. CALCUL DES POURCENTAGES (Correction Téléportation) ===
-    if is_promo:
-        trans_elo = new_base_min
-        old_start_pct = get_pct(old_elo, old_display_min, old_calc_max)
-        old_end_pct = get_pct(trans_elo, old_display_min, old_calc_max)
-        # 🔴 CORRECTION : La nouvelle barre part de 0% pour montrer le remplissage du buffer
-        new_start_pct = 0 
-        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
-    elif is_demote:
-        trans_elo = old_base_min - 25
-        old_start_pct = get_pct(old_elo, old_display_min, old_calc_max)
-        old_end_pct = get_pct(trans_elo, old_display_min, old_calc_max)
-        # 🔴 CORRECTION : La nouvelle barre part de 100% et se vide
-        new_start_pct = 100 
-        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
-    else:
-        old_start_pct = get_pct(old_elo, new_display_min, new_calc_max)
-        new_end_pct = get_pct(new_elo, new_display_min, new_calc_max)
-
-    diff = int(new_elo - old_elo)
-    color_pts = "#2ecc71" if diff > 0 else "#e74c3c"
-
-    # === 4. STYLES (Zone de Danger) ===
-    if is_same and is_in_danger:
-        status_text = "⚠️ ZONE DE DANGER"
-        status_color = "#ff4b2b"
-        border_color = "#ff4b2b"
-        bar_color = "linear-gradient(90deg, #ff4b2b, #ff416c)"
-        bar_shadow = "#ff4b2b"
-        anim_pulse = "animation: dangerPulse 2s infinite;"
-    else:
-        status_text = new_rank_info['name']
-        status_color = "white"
-        border_color = "rgba(198,156,37,0.3)"
-        bar_color = new_rank_info['bg_gradient']
-        bar_shadow = new_rank_info['color']
-        anim_pulse = ""
-
-    # === 5. ANIMATIONS CSS CINÉMATIQUES ===
-    if is_promo:
-        anim_css = f"@keyframes fillOld {{from {{width: {old_start_pct}%;}} to {{width: {old_end_pct}%;}}}} @keyframes fillNew {{from {{width: {new_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-phase1 {{animation: fillOld 1.5s ease-in forwards;}} .bar-phase2 {{width: {new_start_pct}%; animation: fillNew 1.5s 1.7s ease-out forwards;}}"
-        flash_anim = "flashPromo"
-    elif is_demote:
-        anim_css = f"@keyframes drainOld {{from {{width: {old_start_pct}%;}} to {{width: {old_end_pct}%;}}}} @keyframes drainNew {{from {{width: {new_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-phase1 {{animation: drainOld 1.5s ease-in forwards;}} .bar-phase2 {{width: {new_start_pct}%; animation: drainNew 1.5s 1.7s ease-out forwards;}}"
-        flash_anim = "flashDemote"
-    else:
-        anim_css = f"@keyframes moveBar {{from {{width: {old_start_pct}%;}} to {{width: {new_end_pct}%;}}}} .bar-single {{animation: moveBar 2s ease-out forwards;}} @keyframes dangerPulse {{ 0% {{opacity: 1;}} 50% {{opacity: 0.6;}} 100% {{opacity: 1;}} }}"
-        flash_anim = "none"
-
-    # === 6. HTML MINIFIÉ ===
-    html = f"""<style>{anim_css}
-    @keyframes fadeOut {{ 0%, 88% {{opacity:1; transform:scale(1);}} 100% {{opacity:0; transform:scale(1.3); visibility:hidden;}} }}
-    @keyframes fadeIn {{ 0%, 88% {{opacity:0; transform:scale(0.5);}} 100% {{opacity:1; transform:scale(1);}} }}
-    @keyframes flashPromo {{ 0%, 45% {{border-color: rgba(198,156,37,0.3); box-shadow: 0 0 0px transparent;}} 50% {{border-color: white; box-shadow: 0 0 50px white;}} 100% {{border-color: {new_rank_info['color']}; box-shadow: 0 10px 30px rgba(0,0,0,0.5);}} }}
-    @keyframes flashDemote {{ 0%, 45% {{border-color: rgba(198,156,37,0.3); box-shadow: 0 0 0px transparent;}} 50% {{border-color: #ff4b2b; box-shadow: 0 0 50px #ff4b2b;}} 100% {{border-color: {new_rank_info['color']}; box-shadow: 0 10px 30px rgba(0,0,0,0.5);}} }}
-    .xp-card {{width:100%; max-width:600px; margin:0 auto; font-family:'Montserrat',sans-serif; background:#0f172a; padding:40px 30px; border-radius:20px; border:2px solid {border_color}; text-align:center; color:white; overflow:hidden;}}
-    .card-anim-cinematic {{animation: {flash_anim} 3.5s forwards;}}
-    .swap-out {{animation: fadeOut 1.7s forwards;}}
-    .swap-in {{opacity:0; animation: fadeIn 1.7s forwards;}}
-    .huge-icon img, .huge-icon svg {{width:130px !important; height:130px !important; object-fit:contain;}}
-    .prog-container {{width:100%; height:18px; background:#1e293b; border-radius:9px; overflow:hidden; border:1px solid #334155; position:relative; {anim_pulse}}}
-    .bar-base {{height:100%;}}
-    </style>
-    <div class="xp-card {'card-anim-cinematic' if not is_same else ''}">
-    """
-
-    if is_same:
-        html += f"""
-        <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
-            <div class="huge-icon">{new_rank_info['icon']}</div>
-            <span style="font-weight:900; color:{status_color}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{status_text}</span>
-        </div>
-        <div class="prog-container"><div class="bar-base bar-single" style="background:{bar_color}; box-shadow:0 0 15px {bar_shadow};"></div></div>
-        <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
-            <span>{new_display_min} ELO {'(SURVIE)' if is_in_danger else ''}</span>
-            <span>{new_display_max}{' ELO' if new_display_max != 'MAX' else ''}</span>
-        </div>
-        """
-    else:
-        html += f"""
-        <div style="display: grid; grid-template-columns: 1fr;">
-            <div style="grid-row: 1; grid-column: 1; z-index: 2;" class="swap-out">
-                <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
-                    <div class="huge-icon">{old_rank_info['icon']}</div>
-                    <span style="font-weight:900; color:{'#e74c3c' if is_demote else 'white'}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{old_rank_info['name']}</span>
-                </div>
-                <div class="prog-container"><div class="bar-base bar-phase1" style="background:{old_rank_info['bg_gradient']}; box-shadow:0 0 15px {old_rank_info['color']};"></div></div>
-                <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
-                    <span>{old_display_min} ELO</span>
-                    <span>{old_display_max}{' ELO' if old_display_max != 'MAX' else ''}</span>
-                </div>
-            </div>
-            
-            <div style="grid-row: 1; grid-column: 1; z-index: 3;" class="swap-in">
-                <div style="display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:35px;">
-                    <div class="huge-icon">{new_rank_info['icon']}</div>
-                    <span style="font-weight:900; color:{'#f1c40f' if is_promo else '#e74c3c'}; font-size:1.8em; text-transform:uppercase; letter-spacing:1px;">{'⬆️ PROMOTION !' if is_promo else '⬇️ RÉTROGRADATION...'}</span>
-                </div>
-                <div class="prog-container"><div class="bar-base bar-phase2" style="background:{new_rank_info['bg_gradient']}; box-shadow:0 0 15px {new_rank_info['color']};"></div></div>
-                <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:0.9em; color:#8BA1B5; font-weight:bold;">
-                    <span>{new_display_min} ELO {'(SURVIE)' if is_in_danger else ''}</span>
-                    <span>{new_display_max}{' ELO' if new_display_max != 'MAX' else ''}</span>
-                </div>
-            </div>
-        </div>
-        """
-
-    html += f"""
-        <div style="margin-top:40px; position:relative; z-index:5;">
-            <div style="font-family:'Playfair Display',serif; font-size:3.2em; font-weight:bold;">{int(new_elo)} <span style="font-size:0.3em; color:#C69C25;">ELO</span></div>
-            <div style="color:{color_pts}; font-weight:900; font-size:1.6em; margin-top:5px;">{diff:+} PTS</div>
-        </div>
-    </div>
-    """
-    return html.replace('\n', '')
-
- 
-def draw_luxury_table(data_list, title=None, columns=None, is_ranking=True):
-    """Génère un tableau HTML au design 'Snook'R Héraldique' avec option podium"""
-    if not data_list: return ""
-    
-    html = ""
-    if title:
-        html += f"<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25; margin-bottom: 15px; margin-top: 20px;\">{title}</h4>"
-        
-    html += "<table style='width: 100%; border-collapse: collapse; margin-bottom: 25px; background: rgba(255,255,255, 0.03); border-radius: 8px; overflow: hidden; border: 1px solid rgba(198, 156, 37, 0.3);'>"
-    
-    # En-tête
-    if not columns:
-        columns = list(data_list[0].keys())
-        
-    html += "<thead style='background-color: rgba(198, 156, 37, 0.1); border-bottom: 2px solid #C69C25;'><tr>"
-    for col in columns:
-        # On aligne les textes longs à gauche, les chiffres au centre
-        align = "left" if col in ["Joueur", "Nom", "Détails du Match"] else "center"
-        html += f"<th style='padding: 12px; text-align: {align}; color: #C69C25; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px;'>{col}</th>"
-    html += "</tr></thead><tbody>"
-    
-    # Lignes
-    for i, row in enumerate(data_list, 1):
-        bg_row = "transparent"
-        rank_color = "inherit"
-        rank_icon = str(row.get("Rang", row.get("Numéro", i)))
-        
-        # GESTION DU PODIUM (Uniquement si is_ranking est True)
-        if is_ranking:
-            # On tente de récupérer la vraie valeur du rang si elle existe
-            try:
-                actual_rank = int(row.get("Rang", i))
-            except:
-                actual_rank = i
-                
-            if actual_rank == 1:
-                bg_row = "rgba(198, 156, 37, 0.08)" # Or subtil
-                rank_color = "#FFD700" 
-                rank_icon = "🥇"
-            elif actual_rank == 2:
-                bg_row = "rgba(224, 255, 255, 0.04)" # Argent très léger
-                rank_color = "#E0FFFF"
-                rank_icon = "🥈"
-            elif actual_rank == 3:
-                bg_row = "rgba(205, 127, 50, 0.04)" # Bronze très léger
-                rank_color = "#CD7F32"
-                rank_icon = "🥉"
-            else:
-                rank_icon = str(actual_rank)
-                
-        html += f"<tr style='background-color: {bg_row}; border-bottom: 1px solid rgba(198, 156, 37, 0.15);'>"
-        for col in columns:
-            val = row.get(col, "")
-            align = "left" if col in ["Joueur", "Nom", "Détails du Match"] else "center"
-            
-            if is_ranking and col in ["Rang", "Numéro"]:
-                html += f"<td style='padding: 12px; text-align: {align}; font-weight: bold; color: {rank_color}; font-size: 1.2em;'>{rank_icon}</td>"
-            elif col in ["Joueur", "Nom"]:
-                html += f"<td style='padding: 12px; text-align: {align}; font-weight: 600;'>{val}</td>"
-            else:
-                html += f"<td style='padding: 12px; text-align: {align}; opacity: 0.9;'>{val}</td>"
-        html += "</tr>"
-        
-    html += "</tbody></table>"
-    return html
-
-
-def get_rank_info(current_elo, current_rank_id=None):
-    # (Ton code ici...)
-    strict_rank = None
-    for tier in reversed(RANK_TIERS):
-        if current_elo >= tier["threshold"]:
-            strict_rank = tier
-            break
-            
-    if current_rank_id is None:
-        return strict_rank
-
-    if strict_rank["id"] < current_rank_id:
-        current_tier = next(t for t in RANK_TIERS if t["id"] == current_rank_id)
-        if current_elo >= (current_tier["threshold"] - 25):
-            return current_tier 
-        else:
-            return strict_rank 
-    else:
-        return strict_rank 
-
-
-def draw_rank_badge(elo, current_rank_id=None):
-    rank = get_rank_info(elo, current_rank_id) # On passe l'ID actuel pour activer le bouclier !
-    
-    # On récupère l'icône (qui est déjà une balise <img> complète en Base64)
-    icon_html = rank['icon']
-    
-    # On l'intègre dans un design plus grand pour le profil
-    html = f"""
-    <div style="
-        background: {rank['bg_gradient']};
-        border: 2px solid {rank['color']};
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        box-shadow: {rank.get('glow', '0 0 10px rgba(0,0,0,0.5)')};
-        color: white;
-    ">
-        <div style="transform: scale(2); margin-bottom: 15px;">{icon_html}</div>
-        <div style="font-family: 'Playfair Display', serif; font-size: 1.5em; font-weight: bold;">
-            {rank['name'].upper()}
-        </div>
-        <div style="font-size: 1em; opacity: 0.9;">{int(elo)} Elo</div>
-    </div>
-    """
-    return html
-
-
-def get_badges_html(player, matches_history):
-    """
-    Génère les badges avec progression visible et infobulles compatibles mobile.
-    Version compactée sans retours à la ligne pour éviter les bugs d'affichage.
-    """
-
-    # --- 1. CALCUL DES STATS ---
-    # 🔴 CORRECTION ICI : On utilise la longueur de l'historique complet pour ne pas être affecté par le reset de saison !
-    total_matches = len(matches_history)
-    wins = 0
-    current_streak = 0
-    unique_opponents = set()
-    matches_by_day = {}
-    partners_counter = {}
-
-    has_giant_kill = False
-    streak_active = True
-
-    sorted_matches = sorted(
-        matches_history, key=lambda x: str(x["created_at"]), reverse=True
-    )
-
-    for m in sorted_matches:
-        # Conversion UTC -> Paris
-        dt_utc = pd.to_datetime(m["created_at"])
-        dt_paris = (
-            dt_utc.tz_convert("Europe/Paris")
-            if dt_utc.tzinfo
-            else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
-        )
-        day = dt_paris.strftime("%Y-%m-%d")
-        if day not in matches_by_day:
-            matches_by_day[day] = 0
-        matches_by_day[day] += 1
-
-        is_2v2 = m.get("mode") == "2v2"
-        is_win = m["winner_id"] == player["id"] or m.get("winner2_id") == player["id"]
-
-        if is_2v2:
-            partner_id = None
-            if m["winner_id"] == player["id"]:
-                partner_id = m.get("winner2_id")
-            elif m.get("winner2_id") == player["id"]:
-                partner_id = m["winner_id"]
-            elif m["loser_id"] == player["id"]:
-                partner_id = m.get("loser2_id")
-            elif m.get("loser2_id") == player["id"]:
-                partner_id = m["loser_id"]
-            if partner_id:
-                partners_counter[partner_id] = partners_counter.get(partner_id, 0) + 1
-
-        if is_win:
-            wins += 1
-            if streak_active:
-                current_streak += 1
-            if m.get("elo_gain", 0) >= 30:
-                has_giant_kill = True
-            opp_ids = [m["loser_id"], m.get("loser2_id")] if is_2v2 else [m["loser_id"]]
-            for oid in opp_ids:
-                if oid:
-                    unique_opponents.add(oid)
-        else:
-            streak_active = False
-            opp_ids = (
-                [m["winner_id"], m.get("winner2_id")] if is_2v2 else [m["winner_id"]]
-            )
-            for oid in opp_ids:
-                if oid:
-                    unique_opponents.add(oid)
-
-    max_daily_matches = max(matches_by_day.values()) if matches_by_day else 0
-    nb_unique = len(unique_opponents)
-    max_duo_matches = max(partners_counter.values()) if partners_counter else 0
-    has_marathon = max_daily_matches >= 10
-
-    # --- 2. GÉNÉRATEUR DE HTML ---
-    html_parts = []
-
-    # --- Dictionnaire des couleurs magiques ---
-    # Tu peux ajuster ces codes couleurs hexadécimaux selon tes goûts
-    TIER_COLORS = {
-        "bronze": "#cd7f32",
-        "silver": "#c0c0c0",
-        "gold": "#ffd700",
-        "platinum": "#00e5ff", # Un cyan brillant fait très "Platine/Diamant"
-        "magma": "#ff4500",
-        "electric": "#ffd700",
-        "blood": "#ff0000",
-        "locked": "#444444"
-    }
-
-    def process_tier_badge(current_val, tiers, base_image_url, label):
-        # 🛡️ LE BULLDOZER : Retire guillemets, retours à la ligne et espaces !
-        clean_url = base_image_url.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').replace(' ', '')
-        
-        achieved_tier = None
-        next_tier = None
-        for tier in tiers:
-            if current_val >= tier["req"]:
-                achieved_tier = tier
-            else:
-                next_tier = tier
-                break
-
-        progress_text = f"<span style='color: #4db8ff; font-weight:bold;'>📊 Actuel : {current_val}</span>"
-
-        if achieved_tier:
-            style = achieved_tier["style"]
-            name = achieved_tier["name"]
-            color = TIER_COLORS.get(style, "#ffffff")
-            if next_tier:
-                tooltip_text = f"✅ {name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Prochain : {next_tier['name']} ({next_tier['req']} {label})</span>"
-            else:
-                tooltip_text = f"🏆 NIVEAU MAX<br>{name}<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>Vous êtes une légende !</span>"
-            css_class = ""
-        else:
-            first_tier = tiers[0]
-            style = "locked"
-            name = first_tier["name"]
-            color = TIER_COLORS["locked"]
-            tooltip_text = f"🔒 BLOQUÉ<br>{progress_text}<br><span style='font-size:0.9em; opacity:0.8;'>🎯 Objectif : {first_tier['req']} {label}</span>"
-            css_class = "locked"
-
-        # 🔴 NOUVEAU DESIGN : Pas de cadre, juste lueur & image plus grosse
-        badge_html = f'''<div class="badge-item {css_class}" style="position: relative; display: flex; flex-direction: column; align-items: center; margin: 10px; width: 80px;">
-<div style="width: 70px; height: 70px; display: flex; justify-content: center; align-items: center; position: relative;">
-<img src="{clean_url}" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />
-</div>
-<div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; color: {color if style != 'locked' else '#888'}; text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); text-align: center;">{name}</div>
-<span class="tooltip-content">{tooltip_text}</span>
-</div>'''
-        html_parts.append(badge_html)
-    
-    def add_special(cond, style, image_url, name, desc, current_stat=""):
-        # 🛡️ LE BULLDOZER
-        clean_url = image_url.replace('"', '').replace("'", "").replace('\n', '').replace('\r', '').replace(' ', '')
-        
-        css_class = "" if cond else "locked"
-        color = TIER_COLORS.get(style, "#ffffff") if cond else TIER_COLORS["locked"]
-        
-        stat_line = f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>" if current_stat else ""
-        if cond:
-            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
-        else:
-            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
-
-        # 🔴 PAREIL ICI : Pas d'hexagone, lueur intense & image grosse
-        badge_html = f'''<div class="badge-item {css_class}" style="position: relative; display: flex; flex-direction: column; align-items: center; margin: 10px; width: 80px;">
-<div style="width: 70px; height: 70px; display: flex; justify-content: center; align-items: center; position: relative;">
-<img src="{clean_url}" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 8px {color});" />
-</div>
-<div style="font-size: 0.85em; font-weight: bold; margin-top: 8px; color: {color if cond else '#888'}; text-transform: uppercase; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); text-align: center;">{name}</div>
-<span class="tooltip-content">{tooltip_text}</span>
-</div>'''
-        html_parts.append(badge_html)
-
-    # --- 3. DÉFINITION DES PALIERS ---
-    
-    # 1. Palier Fidélité (Matchs)
-    tiers_fidelity = [
-        {"req": 10, "style": "bronze", "name": "Rookie"},
-        {"req": 50, "style": "silver", "name": "Confirmé"},
-        {"req": 100, "style": "gold", "name": "Pilier"},
-        {"req": 200, "style": "platinum", "name": "Légende"},
-    ]
-    process_tier_badge(total_matches, tiers_fidelity, BADGES_B64["fidelite"], "matchs")
-
-    # 2. Palier Victoire
-    tiers_victory = [
-        {"req": 10, "style": "bronze", "name": "Gâchette"},
-        {"req": 25, "style": "silver", "name": "Conquérant"},
-        {"req": 50, "style": "gold", "name": "Champion"},
-        {"req": 100, "style": "platinum", "name": "Invincible"},
-    ]
-    process_tier_badge(wins, tiers_victory, BADGES_B64["victoire"], "victoires")
-
-    # 3. Palier Duo
-    tiers_duo = [
-        {"req": 10, "style": "bronze", "name": "Binôme"},
-        {"req": 30, "style": "silver", "name": "Frères d'armes"},
-        {"req": 60, "style": "gold", "name": "Fusion"},
-        {"req": 120, "style": "platinum", "name": "Symbiose"},
-    ]
-    process_tier_badge(max_duo_matches, tiers_duo, BADGES_B64["duo"], "matchs ensemble")
-
-    # 4. Palier Social
-    tiers_social = [
-        {"req": 5, "style": "bronze", "name": "Explorateur"},
-        {"req": 10, "style": "silver", "name": "Voyageur"},
-        {"req": 20, "style": "gold", "name": "Monde"},
-        {"req": 40, "style": "platinum", "name": "Universel"},
-    ]
-    process_tier_badge(nb_unique, tiers_social, BADGES_B64["social"], "adversaires")
-
-    # 5. Badges Spéciaux
-    add_special(
-        current_streak >= 5,
-        "magma",
-        BADGES_B64["on_fire"],
-        "On Fire",
-        "Série de 5 victoires",
-        f"Série : {current_streak}",
-    )
-    add_special(
-        has_marathon,
-        "electric",
-        BADGES_B64["marathon"],
-        "Marathon",
-        "10 matchs en 1 jour",
-        f"Record jour : {max_daily_matches}",
-    )
-    add_special(
-        has_giant_kill,
-        "blood",
-        BADGES_B64["tueur"],
-        "Tueur",
-        "Battre un +200 Elo",
-        "Accompli !" if has_giant_kill else "Pas encore...",
-    )
-
-    container_style = "display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
-    return f'<div style="{container_style}">{"".join(html_parts)}</div>'
-    
-    def add_special(cond, shape, style, icon, name, desc, current_stat=""):
-        css = "" if cond else "locked"
-        stat_line = (
-            f"<br><span style='color: #ff9f43; font-weight:bold;'>{current_stat}</span>"
-            if current_stat
-            else ""
-        )
-        if cond:
-            tooltip_text = f"✅ {name}{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>{desc}</span>"
-        else:
-            tooltip_text = f"🔒 BLOQUÉ{stat_line}<br><span style='font-size:0.9em; opacity:0.8;'>Objectif : {desc}</span>"
-
-        badge_html = f'<div class="badge-item {css}"><div class="badge-icon-box {shape} {style}">{icon}</div><div class="badge-name">{name}</div><span class="tooltip-content">{tooltip_text}</span></div>'
-        html_parts.append(badge_html)
-
-    # --- 3. DÉFINITION DES PALIERS ---
-    tiers_fidelity = [
-        {"req": 10, "style": "bronze", "name": "Rookie"},
-        {"req": 50, "style": "silver", "name": "Confirmé"},
-        {"req": 100, "style": "gold", "name": "Pilier"},
-        {"req": 200, "style": "platinum", "name": "Légende"},
-    ]
-    process_tier_badge(total_matches, tiers_fidelity, "shield", "⚔️", "matchs")
-
-    tiers_victory = [
-        {"req": 10, "style": "bronze", "name": "Gâchette"},
-        {"req": 25, "style": "silver", "name": "Conquérant"},
-        {"req": 50, "style": "gold", "name": "Champion"},
-        {"req": 100, "style": "platinum", "name": "Invincible"},
-    ]
-    process_tier_badge(wins, tiers_victory, "star", "🏆", "victoires")
-
-    tiers_duo = [
-        {"req": 10, "style": "bronze", "name": "Binôme"},
-        {"req": 30, "style": "silver", "name": "Frères d'armes"},
-        {"req": 60, "style": "gold", "name": "Fusion"},
-        {"req": 120, "style": "platinum", "name": "Symbiose"},
-    ]
-    process_tier_badge(max_duo_matches, tiers_duo, "circle", "🤝", "matchs ensemble")
-
-    tiers_social = [
-        {"req": 5, "style": "bronze", "name": "Explorateur"},
-        {"req": 10, "style": "silver", "name": "Voyageur"},
-        {"req": 20, "style": "gold", "name": "Monde"},
-        {"req": 40, "style": "platinum", "name": "Universel"},
-    ]
-    process_tier_badge(nb_unique, tiers_social, "circle", "🌍", "adversaires")
-
-    add_special(
-        current_streak >= 5,
-        "hexagon",
-        "magma",
-        "🔥",
-        "On Fire",
-        "Série de 5 victoires",
-        f"Série : {current_streak}",
-    )
-    add_special(
-        has_marathon,
-        "hexagon",
-        "electric",
-        "⚡",
-        "Marathon",
-        "10 matchs en 1 jour",
-        f"Record jour : {max_daily_matches}",
-    )
-    add_special(
-        has_giant_kill,
-        "hexagon",
-        "blood",
-        "🩸",
-        "Tueur",
-        "Battre un +200 Elo",
-        "Accompli !" if has_giant_kill else "Pas encore...",
-    )
-
-    container_style = "display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; background: rgba(20, 20, 30, 0.4); padding: 15px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
-    return f'<div style="{container_style}">{"".join(html_parts)}</div>'
-
 
 # 2. Initialisation du manager et du CookieManager
 db = DBManager()
@@ -620,7 +60,7 @@ if access_token and refresh_token and not st.session_state.logout_clicked:
     try:
         db.supabase.auth.set_session(access_token, refresh_token)
     except Exception:
-        pass # Le token est peut-être expiré
+        pass  # Le token est peut-être expiré
 
 # 2. On récupère les données du profil SEULEMENT si elles ne sont pas déjà en mémoire
 if st.session_state.user_data is None and not st.session_state.logout_clicked:
@@ -650,7 +90,7 @@ if st.session_state.user_data is None:
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
+
     tab1, tab2 = st.tabs(["Connexion", "Créer un compte"])
 
     with tab1:
@@ -702,7 +142,7 @@ if st.session_state.user_data is None:
                     st.session_state.logout_clicked = False
                     st.success("Connexion réussie !")
                     st.rerun()
-                    
+
         # BOUTON VISITEUR ---
         st.write("---")
         if st.button("👁️ Entrer sans compte (Mode Visiteur)"):
@@ -716,14 +156,14 @@ if st.session_state.user_data is None:
             st.rerun()
 
         st.write("---")
-        
+
         # --- MOT DE PASSE OUBLIÉ (MÉTHODE PAR CODE) ---
         with st.expander("Mot de passe oublié ?"):
             st.info("Entrez votre email. Vous recevrez un code à 8 caractères pour changer votre mot de passe.")
-            
+
             # Étape 1 : Saisie de l'email
             reset_email = st.text_input("Votre adresse email", key="reset_email_input")
-            
+
             if st.button("Envoyer le code", type="secondary"):
                 if not reset_email:
                     st.warning("Veuillez entrer une adresse email.")
@@ -736,17 +176,17 @@ if st.session_state.user_data is None:
                         st.rerun()
                     else:
                         st.error(msg)
-            
+
             # Étape 2 : Saisie du code et du nouveau mot de passe
             if st.session_state.get("reset_in_progress"):
                 st.divider()
                 st.markdown(f"Veuillez entrer le code reçu sur **{st.session_state.reset_email_target}**")
-                
+
                 # Modification ici : max_chars passe à 8
                 reset_code = st.text_input("Code à 8 caractères reçu par e-mail", max_chars=8)
                 new_pwd = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password", key="new_pwd_reset")
                 new_pwd_confirm = st.text_input("Confirmez le nouveau mot de passe", type="password", key="new_pwd_confirm_reset")
-                
+
                 if st.button("Valider et changer le mot de passe", type="primary"):
                     # Modification ici : on vérifie que la longueur est bien de 8
                     if len(reset_code) != 8:
@@ -812,7 +252,7 @@ if current_id != "guest":
         # --- 1. INITIALISATION DES DONNÉES ---
         last_seen_1v1 = user.get("last_seen_elo_1v1")
         last_seen_2v2 = user.get("last_seen_elo_2v2")
-        
+
         updates_init = {}
         if last_seen_1v1 is None:
             last_seen_1v1 = user.get("elo_rating", 1000)
@@ -820,29 +260,33 @@ if current_id != "guest":
         if last_seen_2v2 is None:
             last_seen_2v2 = user.get("elo_2v2", 1000)
             updates_init["last_seen_elo_2v2"] = last_seen_2v2
-            
+
         if updates_init:
             db.supabase.table("profiles").update(updates_init).eq("id", user["id"]).execute()
 
         # --- 2. VÉRIFICATION DU 1V1 ---
         if user.get("elo_rating") != last_seen_1v1:
-            old_r = get_rank_info(last_seen_1v1, user.get("current_rank_id_1v1")) 
+            old_r = get_rank_info(last_seen_1v1, user.get("current_rank_id_1v1"))
             new_r = get_rank_info(user["elo_rating"], user.get("current_rank_id_1v1"))
-            
+
             is_gain = user["elo_rating"] > last_seen_1v1
             is_promo = new_r["id"] > old_r["id"]
             is_demote = new_r["id"] < old_r["id"]
 
             if is_promo:
                 st.balloons()
-                title, msg = "🚀 NOUVEAU GRADE 1V1 !", f"Incroyable ! Vous montez en grade Solo : <b>{new_r['name']}</b>"
+                title = "🚀 NOUVEAU GRADE 1V1 !"
+                msg = f"Incroyable ! Vous montez en grade Solo : <b>{new_r['name']}</b>"
             elif is_demote:
-                title, msg = "📉 Rétrogradation 1v1", "Courage ! Un mauvais passage en Solo, mais vous allez remonter."
+                title = "📉 Rétrogradation 1v1"
+                msg = "Courage ! Un mauvais passage en Solo, mais vous allez remonter."
             elif is_gain:
                 st.balloons()
-                title, msg = "🎊 Nouveaux résultats 1v1 !", "Félicitations ! Vos points Solo ont été mis à jour."
+                title = "🎊 Nouveaux résultats 1v1 !"
+                msg = "Félicitations ! Vos points Solo ont été mis à jour."
             else:
-                title, msg = "📊 Résultats mis à jour (1v1)", "Vos derniers matchs Solo ont été enregistrés."
+                title = "📊 Résultats mis à jour (1v1)"
+                msg = "Vos derniers matchs Solo ont été enregistrés."
 
             st.markdown(f"<h2 style='text-align: center; color: #C69C25; font-family: \"Playfair Display\";'>{title}</h2>", unsafe_allow_html=True)
             st.markdown(f"<p style='text-align: center; opacity: 0.8;'>{msg}</p>", unsafe_allow_html=True)
@@ -856,29 +300,33 @@ if current_id != "guest":
                 }
                 db.supabase.table("profiles").update(updates).eq("id", user["id"]).execute()
                 st.rerun()
-                
-            st.stop() # On bloque ici tant que le 1v1 n'est pas validé
+
+            st.stop()  # On bloque ici tant que le 1v1 n'est pas validé
 
         # --- 3. VÉRIFICATION DU 2V2 ---
         # Si le 1v1 est à jour (ou vient d'être validé), on vérifie le 2v2
         elif user.get("elo_2v2") != last_seen_2v2:
-            old_r_2v2 = get_rank_info(last_seen_2v2, user.get("current_rank_id_2v2")) 
+            old_r_2v2 = get_rank_info(last_seen_2v2, user.get("current_rank_id_2v2"))
             new_r_2v2 = get_rank_info(user["elo_2v2"], user.get("current_rank_id_2v2"))
-            
+
             is_gain_2v2 = user["elo_2v2"] > last_seen_2v2
             is_promo_2v2 = new_r_2v2["id"] > old_r_2v2["id"]
             is_demote_2v2 = new_r_2v2["id"] < old_r_2v2["id"]
 
             if is_promo_2v2:
                 st.balloons()
-                title, msg = "🚀 NOUVEAU GRADE 2V2 !", f"Incroyable ! Vous montez en grade Duo : <b>{new_r_2v2['name']}</b>"
+                title = "🚀 NOUVEAU GRADE 2V2 !"
+                msg = f"Incroyable ! Vous montez en grade Duo : <b>{new_r_2v2['name']}</b>"
             elif is_demote_2v2:
-                title, msg = "📉 Rétrogradation 2v2", "Courage ! Un mauvais passage en Duo, mais l'équipe va se reprendre."
+                title = "📉 Rétrogradation 2v2"
+                msg = "Courage ! Un mauvais passage en Duo, mais l'équipe va se reprendre."
             elif is_gain_2v2:
                 st.balloons()
-                title, msg = "🎊 Nouveaux résultats 2v2 !", "Félicitations ! Vos points Duo ont été mis à jour."
+                title = "🎊 Nouveaux résultats 2v2 !"
+                msg = "Félicitations ! Vos points Duo ont été mis à jour."
             else:
-                title, msg = "📊 Résultats mis à jour (2v2)", "Vos derniers matchs Duo ont été enregistrés."
+                title = "📊 Résultats mis à jour (2v2)"
+                msg = "Vos derniers matchs Duo ont été enregistrés."
 
             st.markdown(f"<h2 style='text-align: center; color: #4facfe; font-family: \"Playfair Display\";'>{title}</h2>", unsafe_allow_html=True)
             st.markdown(f"<p style='text-align: center; opacity: 0.8;'>{msg}</p>", unsafe_allow_html=True)
@@ -893,8 +341,8 @@ if current_id != "guest":
                 }
                 db.supabase.table("profiles").update(updates_2v2).eq("id", user["id"]).execute()
                 st.rerun()
-                
-            st.stop() # On bloque ici tant que le 2v2 n'est pas validé
+
+            st.stop()  # On bloque ici tant que le 2v2 n'est pas validé
     st.session_state.user_data = user
 else:
     user = st.session_state.user_data
@@ -917,14 +365,16 @@ except StopIteration:
     rank_2v2 = "-"
 
 # --- BARRE LATÉRALE ---
-# 1. Affichage du Logo Panda (Assure-toi que l'image s'appelle 'logo.jpg' et est dans le même dossier)
+# 1. Affichage du Logo Panda
+# (Assure-toi que l'image s'appelle 'logo.jpg' et est dans le même dossier)
 try:
     # On ajoute un peu d'espace avant et après le logo pour que ça respire
-    st.sidebar.write("") 
+    st.sidebar.write("")
     st.sidebar.image("panda_logo.png", use_container_width=True)
     st.sidebar.write("")
 except Exception:
-    # Sécurité : Si l'image n'est pas trouvée, on remet l'ancien texte au lieu de faire planter l'appli
+    # Sécurité : Si l'image n'est pas trouvée,
+    # on remet l'ancien texte au lieu de faire planter l'appli
     st.sidebar.markdown("<div class='sidebar-logo-text'>🎱 Snook'R</div>", unsafe_allow_html=True)
     st.sidebar.markdown("<div style='text-align: center; color: #888; margin-top: -15px; margin-bottom: 20px; font-style: italic;'>Blackball Club</div>", unsafe_allow_html=True)
 
@@ -970,12 +420,12 @@ if user.get("is_admin"):
 
 # On utilise label_visibility="collapsed" pour un look plus épuré
 page = st.sidebar.radio(
-    "Menu Navigation", 
-    menu_options, 
+    "Menu Navigation",
+    menu_options,
     label_visibility="collapsed"
 )
 
-st.sidebar.write("") # Un petit espace pour respirer avant la suite
+st.sidebar.write("")  # Un petit espace pour respirer avant la suite
 
 # BOUTON DÉCONNEXION ROBUSTE
 if st.sidebar.button("Déconnexion"):
@@ -1022,14 +472,14 @@ elif page == "🏆 Classement":
             if mode_db == "1v1":
                 target_elo = "elo_rating"
                 target_matches = "matches_played"
-                target_rank_col = "current_rank_id_1v1" 
+                target_rank_col = "current_rank_id_1v1"
             else:
                 target_elo = "elo_2v2"
                 target_matches = "matches_2v2"
-                target_rank_col = "current_rank_id_2v2" 
+                target_rank_col = "current_rank_id_2v2"
 
             df = pd.DataFrame(res.data)
-            df = df[df[target_matches] > 0] # Uniquement les actifs
+            df = df[df[target_matches] > 0]  # Uniquement les actifs
 
             if df.empty:
                 st.info("Aucun joueur classé pour le moment dans ce mode.")
@@ -1044,16 +494,16 @@ elif page == "🏆 Classement":
 
                 # 4. Création de la liste pour le tableau VIP
                 list_data = []
-                
+
                 # On trie le dataframe par Elo
                 df = df.sort_values(by=target_elo, ascending=False).reset_index(drop=True)
 
                 for index, row in df.iterrows():
                     joueur_elo = row[target_elo]
-                    joueur_rank_id = row.get(target_rank_col) # NOUVEAU : On récupère l'ID
-                    
+                    joueur_rank_id = row.get(target_rank_col)  # NOUVEAU : On récupère l'ID
+
                     # On passe les deux infos pour que le bouclier fonctionne !
-                    rank_info = get_rank_info(joueur_elo, joueur_rank_id) 
+                    rank_info = get_rank_info(joueur_elo, joueur_rank_id)
                     icone_html = rank_info["icon"]
 
                     list_data.append({
@@ -1062,19 +512,19 @@ elif page == "🏆 Classement":
                         "Points Elo": f"<b>{int(joueur_elo)}</b> <span style='color: #ffd700;'>⭐️</span>",
                         "Matchs": f"{int(row[target_matches])} 🎮"
                     })
-                
+
                 st.markdown(draw_luxury_table(list_data), unsafe_allow_html=True)
 
     with tab_archives:
         st.markdown("#### 📜 Explorer le passé")
         res_archives = db.supabase.table("season_archives").select("season_name").execute()
-        
+
         if not res_archives.data:
             st.info("Aucune saison n'a encore été archivée. Clôturez une saison depuis le Panel Admin !")
         else:
             # Récupérer les noms uniques de saisons
             archived_names = sorted(list(set([s['season_name'] for s in res_archives.data])), reverse=True)
-            
+
             c1, c2 = st.columns(2)
             selected_season = c1.selectbox("Sélectionner la saison :", archived_names)
             arch_mode = c2.radio("Mode :", ["Solo (1v1)", "Duo (2v2)"], horizontal=True, key="rank_archive")
@@ -1087,12 +537,12 @@ elif page == "🏆 Classement":
             except Exception:
                 # SÉCURITÉ : Si "final_elo" n'existe pas, on récupère tout en vrac et on triera en Python pour éviter le crash !
                 archive_data = db.supabase.table("season_archives").select("*").eq("season_name", selected_season).eq("mode", arch_mode_db).execute().data
-            
+
             if not archive_data:
                 st.info(f"Aucun classement trouvé pour **{selected_season}** en **{arch_mode}**.")
             else:
                 list_arch = []
-                
+
                 # 1. On filtre d'abord pour garder uniquement ceux qui ont un match ou plus
                 active_archive_data = []
                 for row in archive_data:
@@ -1105,8 +555,8 @@ elif page == "🏆 Classement":
                 else:
                     # 2. On trie les joueurs actifs par Elo décroissant pour être sûr de l'ordre
                     active_archive_data = sorted(
-                        active_archive_data, 
-                        key=lambda x: float(x.get("final_elo", x.get("elo", x.get("elo_rating", 1000)))), 
+                        active_archive_data,
+                        key=lambda x: float(x.get("final_elo", x.get("elo", x.get("elo_rating", 1000)))),
                         reverse=True
                     )
 
@@ -1114,18 +564,18 @@ elif page == "🏆 Classement":
                     for index, row in enumerate(active_archive_data):
                         score_elo = row.get("final_elo", row.get("elo", row.get("elo_rating", 1000)))
                         nb_matchs = row.get("matches_played", row.get("final_matches", 0))
-                        
+
                         rank_info = get_rank_info(score_elo)
-                        
+
                         list_arch.append({
-                            "Rang": index + 1, # <--- Attribue un numéro propre qui se suit (1, 2, 3...)
+                            "Rang": index + 1,  # <--- Attribue un numéro propre qui se suit (1, 2, 3...)
                             "Joueur": f"<div style='display: flex; align-items: center; gap: 10px;'>{rank_info['icon']} <span>{row.get('username', 'Inconnu')}</span></div>",
                             "Points Elo": f"<b>{int(score_elo)}</b> <span style='color: #a0aec0;'>pts</span>",
                             "Matchs Joués": f"{int(nb_matchs)} 🎮"
                         })
-                    
+
                     st.markdown(draw_luxury_table(list_arch, title=f"Classement Final - {selected_season}"), unsafe_allow_html=True)
-                
+
 elif page == "👤 Profils Joueurs":
     # --- 0. SÉLECTION DU JOUEUR ---
     players_res = db.get_leaderboard()
@@ -1138,10 +588,10 @@ elif page == "👤 Profils Joueurs":
 
     # Menu déroulant
     options = list(players_map.keys())
-    
+
     # 🛑 GESTION DU MODE VISITEUR 🛑
     is_guest = st.session_state.get("guest_mode", False)
-    
+
     try:
         if is_guest and len(all_players) > 0:
             # Si c'est un visiteur, on sélectionne le N°1 du classement
@@ -1170,30 +620,30 @@ elif page == "👤 Profils Joueurs":
     # --- 💎 AFFICHAGE DU RANG ET DU TITRE ---
     target_elo = target_user.get("elo_rating", 1000)
     target_rank_id = target_user.get("current_rank_id_1v1")
-    
+
     # 1. On affiche d'abord le Badge
     badge_html = draw_rank_badge(target_elo, target_rank_id)
     st.markdown(badge_html, unsafe_allow_html=True)
-    
+
     # 2. On affiche le Titre juste en dessous - Version Emblème de Rang
     equipped_title = target_user.get("equipped_title")
     if equipped_title:
         # Initialisations par défaut
-        rank_color = "#C69C25" # Or Snook'R par défaut
-        title_icon = "" # L'emblème du grade ou podium
+        rank_color = "#C69C25"  # Or Snook'R par défaut
+        title_icon = ""  # L'emblème du grade ou podium
 
         # --- 1. DÉTERMINATION DE L'ICÔNE ET DE LA COULEUR ---
 
         # Cas spéciaux : Le Podium (prioritaire car "Champion" ne commence pas par un rang)
         if "Champion" in equipped_title:
-            rank_color = "#FFD700" # Or éclatant
-            title_icon = "🥇" # Médaille d'or
+            rank_color = "#FFD700"  # Or éclatant
+            title_icon = "🥇"  # Médaille d'or
         elif "Dauphin" in equipped_title:
-            rank_color = "#E0FFFF" # Argent
-            title_icon = "🥈" # Médaille d'argent
+            rank_color = "#E0FFFF"  # Argent
+            title_icon = "🥈"  # Médaille d'argent
         elif "3ème" in equipped_title:
-            rank_color = "#CD7F32" # Bronze
-            title_icon = "🥉" # Médaille de bronze
+            rank_color = "#CD7F32"  # Bronze
+            title_icon = "🥉"  # Médaille de bronze
         else:
             # Cas normal : Les Grades (on cherche du plus HAUT au plus BAS dans RANK_TIERS)
             found_rank = False
@@ -1201,13 +651,13 @@ elif page == "👤 Profils Joueurs":
                 if equipped_title.startswith(tier["name"]):
                     rank_color = tier.get("color", "#C69C25")
                     # 🔴 ICI : On récupère l'icône définie dans ranks_config.py
-                    title_icon = tier.get("icon", "🔰") # Fallback si pas d'icône définie
+                    title_icon = tier.get("icon", "🔰")  # Fallback si pas d'icône définie
                     found_rank = True
                     break
-            
+
             # Si vraiment aucun rang trouvé dans config (peu probable), icône générique
             if not found_rank:
-                title_icon = "🔰" # Icône de rang par défaut
+                title_icon = "🔰"  # Icône de rang par défaut
 
         # --- 2. AFFICHAGE DU BADGE STYLÉ AVEC EMBLÈME ---
         st.markdown(f"""
@@ -1243,7 +693,7 @@ elif page == "👤 Profils Joueurs":
     # ==========================================
     # 🏆 VITRINES DE PALMARÈS (PODIUM UNIQUEMENT)
     # ==========================================
-    
+
     # --- 1. PRÉPARATION & NETTOYAGE DES IMAGES ---
     def clean_b64(key):
         raw = BADGES_B64.get(key, "")
@@ -1263,8 +713,9 @@ elif page == "👤 Profils Joueurs":
     def render_trophy_card(rank_key, count):
         """Génère le HTML d'une carte de trophée avec style dynamique"""
         cfg = RARETY_STYLES.get(rank_key)
-        if not cfg: return ""
-        
+        if not cfg:
+            return ""
+
         color = cfg["color"]
         card_css = f"border: 2px solid {color}; border-radius: 12px; padding: 15px; text-align: center; background: color-mix(in srgb, {color} 7%, transparent); min-width: 125px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center;"
         number_css = f"font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: bold; color: {color}; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);"
@@ -1289,12 +740,12 @@ elif page == "👤 Profils Joueurs":
     # --- VITRINE 1 : LE PANTHÉON (GRANDS TOURNOIS) ---
     st.subheader("🏆 Le Panthéon")
     gt_stats = db.get_user_gt_stats(target_user["id"])
-    
+
     if not gt_stats:
         st.caption("Aucune participation en Grand Tournoi pour le moment.")
     else:
         gt_counts = {r: sum(1 for s in gt_stats if s.get('final_rank') == r) for r in [1, 2, 3]}
-        
+
         html_gt = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
         for r in [1, 2, 3]:
             if gt_counts[r] > 0:
@@ -1308,7 +759,7 @@ elif page == "👤 Profils Joueurs":
                 rank = s.get('final_rank')
                 t_name = s.get('grand_tournaments', {}).get('name', 'Tournoi Inconnu')
                 icon = get_list_icon(rank)
-                rank_text = f"{rank}{'er' if rank==1 else 'ème'}" if rank in [1, 2, 3] else f"Top {rank}"
+                rank_text = f"{rank}{'er' if rank == 1 else 'ème'}" if rank in [1, 2, 3] else f"Top {rank}"
                 html_list += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;'>{icon}<span><b>{rank_text}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i></span></div>"
             st.markdown(html_list + "</div>", unsafe_allow_html=True)
 
@@ -1323,13 +774,13 @@ elif page == "👤 Profils Joueurs":
     st.divider()
     st.subheader("🎉 Le Mur du Fun")
     weekly_stats = db.get_user_weekly_stats(target_user["id"])
-    
+
     if not weekly_stats:
         st.caption("Aucune participation aux soirées Weekly Fun pour le moment.")
     else:
         # On ne compte QUE le podium
         w_counts = {r: sum(1 for s in weekly_stats if s['final_rank'] == r) for r in [1, 2, 3]}
-        
+
         html_w = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;'>"
         for r in [1, 2, 3]:
             if w_counts[r] > 0:
@@ -1344,7 +795,7 @@ elif page == "👤 Profils Joueurs":
                 icon = get_list_icon(rank)
                 t_name = s.get('weekly_tournaments', {}).get('name', 'Tournoi Inconnu')
                 t_date = pd.to_datetime(s.get('weekly_tournaments', {}).get('event_date')).strftime('%d/%m/%y') if s.get('weekly_tournaments') else "??/??/??"
-                html_list_w += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;'>{icon}<span><b>{rank}{'er' if rank==1 else 'ème'}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i> <span style='opacity: 0.4; font-size: 0.85em; margin-left: 6px;'>({t_date})</span></span></div>"
+                html_list_w += f"<div style='padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;'>{icon}<span><b>{rank}{'er' if rank == 1 else 'ème'}</b> <span style='opacity: 0.6;'>au</span> <i style='color: #C69C25;'>{t_name}</i> <span style='opacity: 0.4; font-size: 0.85em; margin-left: 6px;'>({t_date})</span></span></div>"
             st.markdown(html_list_w + "</div>", unsafe_allow_html=True)
 
     st.divider()
@@ -1362,28 +813,28 @@ elif page == "👤 Profils Joueurs":
     # --- 2. RÉCUPÉRATION DE TOUS LES MATCHS DU JOUEUR ---
     raw_matches = db.supabase.table("matches").select("*").in_("status", ["validated", "archived"]).eq("mode", target_mode_db).order("created_at", desc=False).execute().data
     user_matches = [m for m in raw_matches if target_user["id"] in [m["winner_id"], m["loser_id"], m.get("winner2_id"), m.get("loser2_id")]]
-    
+
     all_users_map = {p["id"]: p["username"] for p in db.get_all_profiles().data}
 
     if not user_matches:
         st.info(f"{target_user['username']} n'a joué aucun match classé en {view_mode}.")
     else:
         # --- 3. MOTEUR DE CALCUL STATISTIQUE (Par Saison & All-Time) ---
-        user_seasons = {} 
-        
+        user_seasons = {}
+
         # A. Initialisation des saisons
         user_seasons["🔥 Saison en cours"] = {'matches': [], 'end_elo': target_user.get("elo_rating" if target_mode_db == "1v1" else "elo_2v2", 1000)}
         arch_data = db.supabase.table("season_archives").select("*").eq("player_id", target_user["id"]).eq("mode", target_mode_db).execute().data
         for arc in arch_data:
             user_seasons[arc["season_name"]] = {'matches': [], 'end_elo': arc["final_elo"]}
-            
+
         # B. Distribution des matchs dans les saisons
         for m in user_matches:
             s_name = m.get("season_name") if m.get("status") == "archived" else "🔥 Saison en cours"
             if s_name not in user_seasons:
                 user_seasons[s_name] = {'matches': [], 'end_elo': 1000}
             user_seasons[s_name]['matches'].append(m)
-            
+
         # C. Variables Globales (All-Time)
         all_time_peak = 1000
         global_wins = 0
@@ -1391,37 +842,38 @@ elif page == "👤 Profils Joueurs":
         global_current_streak = 0
         global_opponents = {}
         global_dates = {}
-        
+
         season_curves = {}
         season_stats = {}
-        
+
         # D. Calculs des courbes, pics et adversaires PAR SAISON
         for s_name, s_data in user_seasons.items():
             s_matches = s_data['matches']
-            if not s_matches and s_name != "🔥 Saison en cours": continue
-            
+            if not s_matches and s_name != "🔥 Saison en cours":
+                continue
+
             # Calcul du gain net pour trouver l'Elo de départ exact
             net_gain = 0
             for m in s_matches:
                 is_win = target_user["id"] in [m["winner_id"], m.get("winner2_id")]
                 delta = m.get("elo_loss", m.get("elo_gain", 0)) if not is_win else m.get("elo_gain", 0)
                 net_gain += delta if is_win else -delta
-                
+
             start_elo = s_data['end_elo'] - net_gain
             current_s_elo = start_elo
             s_peak = start_elo
             s_wins = 0
-            s_opponents = {} 
+            s_opponents = {}
             s_dates = {}
             s_max_streak = 0
             s_current_streak = 0
-            
+
             curve = [{"Numéro": 0, "Date": "Début", "Elo": start_elo, "Gain": 0, "Résultat": "-"}]
-            
+
             for i, m in enumerate(s_matches):
                 is_win = target_user["id"] in [m["winner_id"], m.get("winner2_id")]
                 delta = m.get("elo_loss", m.get("elo_gain", 0)) if not is_win else m.get("elo_gain", 0)
-                
+
                 # Traqueurs Globaux & Saison (Séries)
                 if is_win:
                     global_wins += 1
@@ -1433,25 +885,25 @@ elif page == "👤 Profils Joueurs":
                 else:
                     global_current_streak = 0
                     s_current_streak = 0
-                    
+
                 # Traqueur adversaires (Saison & Global)
                 opp_ids = [m["loser_id"], m.get("loser2_id")] if is_win else [m["winner_id"], m.get("winner2_id")]
                 for oid in [oid for oid in opp_ids if oid]:
                     s_opponents[oid] = s_opponents.get(oid, 0) + 1
                     global_opponents[oid] = global_opponents.get(oid, 0) + 1
-                    
+
                 current_s_elo += delta if is_win else -delta
                 s_peak = max(s_peak, current_s_elo)
                 all_time_peak = max(all_time_peak, current_s_elo)
-                
+
                 dt_utc = pd.to_datetime(m["created_at"])
                 dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
-                
+
                 # Traqueur Dates (Marathon)
                 day_str = dt_paris.strftime("%Y-%m-%d")
                 s_dates[day_str] = s_dates.get(day_str, 0) + 1
                 global_dates[day_str] = global_dates.get(day_str, 0) + 1
-                
+
                 curve.append({
                     "Numéro": i + 1,
                     "Date": dt_paris.strftime("%d/%m %Hh%M"),
@@ -1459,13 +911,13 @@ elif page == "👤 Profils Joueurs":
                     "Gain": delta if is_win else -delta,
                     "Résultat": "Victoire" if is_win else "Défaite"
                 })
-            
+
             # Formatage des stats de la saison
             s_most_played = "Aucun"
             if s_opponents:
                 top_oid, top_c = max(s_opponents.items(), key=lambda x: x[1])
                 s_most_played = f"{all_users_map.get(top_oid, 'Inconnu')} ({top_c} matchs)"
-                
+
             s_max_day = max(s_dates.values()) if s_dates else 0
 
             season_curves[s_name] = curve
@@ -1486,7 +938,7 @@ elif page == "👤 Profils Joueurs":
         if global_opponents:
             g_top_oid, g_top_c = max(global_opponents.items(), key=lambda x: x[1])
             g_most_played = f"{all_users_map.get(g_top_oid, 'Inconnu')} ({g_top_c} matchs)"
-            
+
         g_max_day = max(global_dates.values()) if global_dates else 0
 
         # --- 4. AFFICHAGE DES STATS ALL-TIME ---
@@ -1494,7 +946,7 @@ elif page == "👤 Profils Joueurs":
         global_matches = len(user_matches)
         global_wr = (global_wins / global_matches * 100) if global_matches > 0 else 0
         peak_rank_info = get_rank_info(all_time_peak)
-        
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Matchs Joués", global_matches)
         c2.metric("Taux de Victoire", f"{global_wr:.1f}%", f"{global_wins} V - {global_matches - global_wins} D", delta_color="off")
@@ -1520,10 +972,10 @@ elif page == "👤 Profils Joueurs":
         if available_seasons:
             chosen_season = st.selectbox("Sélectionnez une saison à analyser :", available_seasons, label_visibility="collapsed")
             stats = season_stats[chosen_season]
-            
+
             s_wr = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
             delta_net = stats['end_elo'] - stats['start_elo']
-            
+
             st.markdown(f"**Bilan : {chosen_season}**")
             k1, k2, k3, k4 = st.columns(4)
             # 🔴 CORRECTION DU TEXTE DE VARIATION : Elo Final d'abord, la variation en dessous
@@ -1531,7 +983,7 @@ elif page == "👤 Profils Joueurs":
             k2.metric("Meilleur Elo", int(stats['peak']), get_rank_info(stats['peak'])["name"])
             k3.metric("Matchs de Saison", stats['total'])
             k4.metric("Victoires", stats['wins'], f"{s_wr:.0f}%", delta_color="off")
-            
+
             # Affichage des 3 stats funs de la saison
             if stats['total'] > 0:
                 s1, s2, s3 = st.columns(3)
@@ -1561,15 +1013,15 @@ elif page == "👤 Profils Joueurs":
         with st.expander("📜 Historique des 15 derniers matchs", expanded=False):
             recent_matches = user_matches[::-1][:15]
             history_data = []
-            
+
             for m in recent_matches:
                 is_win = (m["winner_id"] == target_user["id"] or m.get("winner2_id") == target_user["id"])
                 res_str = "✅ VICTOIRE" if is_win else "❌ DÉFAITE"
-                
+
                 dt_utc = pd.to_datetime(m["created_at"])
                 dt_paris = dt_utc.tz_convert("Europe/Paris") if dt_utc.tzinfo else dt_utc.tz_localize("UTC").tz_convert("Europe/Paris")
                 date_str = dt_paris.strftime("%d/%m à %Hh%M")
-                
+
                 points = m.get("elo_gain", 0) if is_win else m.get("elo_loss", m.get("elo_gain", 0))
                 sign = "+" if is_win else "-"
 
@@ -1597,24 +1049,24 @@ elif page == "👤 Profils Joueurs":
 
 elif page == "🎯 Déclarer un match":
     st.header("🎯 Déclarer un résultat")
-    
+
     # 🛑 VÉRIFICATION DU MODE VISITEUR 🛑
     is_guest = st.session_state.get("guest_mode", False)
-    
+
     if is_guest:
         # Message pour le visiteur
         st.warning("🔒 Accès restreint")
         st.write("Vous êtes actuellement en Mode Visiteur. Vous devez créer un compte pour pouvoir déclarer vos matchs et participer au classement officiel.")
-        
+
         # Un petit bouton pour les inviter à se déconnecter du mode visiteur
         if st.button("Se déconnecter et créer un compte"):
             st.session_state.user_data = None
             st.session_state.guest_mode = False
             st.rerun()
-            
+
     else:
         # ✅ LE CODE NORMAL POUR LES VRAIS JOUEURS ✅
-        
+
         # 1. Choix du mode de jeu
         mode_input = st.radio("Type de match", ["👤 1 vs 1", "👥 2 vs 2"], horizontal=True)
 
@@ -1624,19 +1076,19 @@ elif page == "🎯 Déclarer un match":
         # Récupération de la liste des joueurs
         players_res = db.get_leaderboard()
         all_players = players_res.data if players_res.data else []
-        
+
         adv_map = {}
-        
+
         for p in all_players:
             if p["id"] == user["id"]:
-                continue # On s'ignore soi-même
-            
+                continue  # On s'ignore soi-même
+
             # On vérifie l'activité selon le mode
             if mode_input == "👤 1 vs 1":
                 is_active = p.get("matches_played", 0) > 0
             else:
                 is_active = p.get("matches_2v2", 0) > 0
-            
+
             # On ajoute le joueur au dictionnaire s'il est actif, OU si le bouton est coché
             if is_active or show_all_players:
                 # Petit plus visuel : On ajoute le mot "(Inactif)" si le joueur n'a pas encore joué
@@ -1819,7 +1271,7 @@ elif page == "🆚 Comparateur de joueurs":
 
     # 2. SÉLECTEURS (Joueur A vs Joueur B)
     c1, c2, c3 = st.columns([1.5, 0.5, 1.5])
-    
+
     # 🛑 GESTION DU MODE VISITEUR 🛑
     is_guest = st.session_state.get("guest_mode", False)
 
@@ -1827,7 +1279,7 @@ elif page == "🆚 Comparateur de joueurs":
         try:
             if is_guest and len(player_names) > 0:
                 # Si visiteur, on prend le premier de la liste (le N°1 du leaderboard)
-                default_ix_1 = 0 
+                default_ix_1 = 0
             else:
                 default_ix_1 = player_names.index(user["username"])
         except ValueError:
@@ -1846,7 +1298,7 @@ elif page == "🆚 Comparateur de joueurs":
             default_ix_2 = 1
         else:
             default_ix_2 = 1 if len(player_names) > 1 else 0
-            
+
         if player_names[default_ix_2] == p1_name and len(player_names) > 1:
             # Sécurité si jamais le N°2 est le même nom que le N°1 (peu probable mais prudent)
             # Ou si un vrai utilisateur est lui-même à l'index par défaut
@@ -1855,7 +1307,7 @@ elif page == "🆚 Comparateur de joueurs":
                 if player_names[i] != p1_name:
                     default_ix_2 = i
                     break
-        
+
         p2_name = st.selectbox("Joueur 2 (Droite)", player_names, index=default_ix_2)
 
     if p1_name == p2_name:
@@ -1878,7 +1330,7 @@ elif page == "🆚 Comparateur de joueurs":
     raw_matches = (
         db.supabase.table("matches")
         .select("*")
-        .in_("status", ["validated", "archived"]) # CORRECTION ICI : Historique All-Time !
+        .in_("status", ["validated", "archived"])  # CORRECTION ICI : Historique All-Time !
         .eq("mode", target_db_mode)
         .order("created_at", desc=False)
         .execute()
@@ -2154,21 +1606,21 @@ elif page == "🆚 Comparateur de joueurs":
 
 elif page == "📑 Mes validations":
     st.header("📑 Matchs à confirmer")
-    
+
     # 🛑 VÉRIFICATION DU MODE VISITEUR 🛑
     is_guest = st.session_state.get("guest_mode", False)
-    
+
     if is_guest:
         # Message pour le visiteur
         st.warning("🔒 Accès restreint")
         st.write("Vous êtes actuellement en Mode Visiteur. Vous devez créer un compte pour recevoir et valider des matchs.")
-        
+
         # Bouton pour quitter le mode visiteur
         if st.button("Se déconnecter et créer un compte", key="btn_guest_val"):
             st.session_state.user_data = None
             st.session_state.guest_mode = False
             st.rerun()
-            
+
     else:
         # ✅ LE CODE NORMAL POUR LES VRAIS JOUEURS ✅
         pending = db.get_pending_matches(user["id"]).data
@@ -2360,10 +1812,10 @@ elif page == "🔧 Panel Admin":
 
         # A. Récupération des archives pour trouver l'Elo de départ de CETTE saison
         archives = db.supabase.table("season_archives").select("*").order("created_at", desc=True).execute().data
-        
+
         latest_archive_1v1 = {}
         latest_archive_2v2 = {}
-        
+
         if archives:
             for arc in archives:
                 pid = arc["player_id"]
@@ -2425,7 +1877,7 @@ elif page == "🔧 Panel Admin":
                 w_id, l_id = m["winner_id"], m["loser_id"]
                 if w_id in temp_elo_1v1 and l_id in temp_elo_1v1:
                     new_w, new_l, gain, loss = engine.compute_new_ratings(
-                        temp_elo_1v1[w_id], temp_elo_1v1[l_id], 
+                        temp_elo_1v1[w_id], temp_elo_1v1[l_id],
                         matches_1v1[w_id], matches_1v1[l_id]
                     )
                     temp_elo_1v1[w_id] = new_w
@@ -2453,7 +1905,7 @@ elif page == "🔧 Panel Admin":
             stored_gain = m.get("elo_gain", 0)
             if abs(stored_gain - gain) > 0.01:
                 db.supabase.table("matches").update({
-                    "elo_gain": gain, 
+                    "elo_gain": gain,
                     "elo_loss": loss
                 }).eq("id", m["id"]).execute()
                 corrected_matches += 1
@@ -2487,19 +1939,19 @@ elif page == "🔧 Panel Admin":
     st.divider()
     st.subheader("📅 Clôture de Saison")
     st.info("Cette action va archiver les scores, donner les titres au Top 3 et reset les Elos de tout le monde.")
-    
+
     with st.expander("🚀 Lancer la fin de saison"):
         # --- SÉLECTEURS DE DATE POUR LE NOM DE SAISON ---
         col_c1, col_c2 = st.columns(2)
-        
+
         mois_fr = [
             "Janvier", "Février", "Mars", "Avril", "Mai", "Juin", 
             "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
         ]
-        
+
         # On récupère la date actuelle pour pré-remplir les sélecteurs
         now = datetime.now()
-        
+
         with col_c1:
             sel_month = st.selectbox("Mois de la saison", mois_fr, index=now.month - 1)
         with col_c2:
@@ -2508,22 +1960,22 @@ elif page == "🔧 Panel Admin":
 
         # On construit automatiquement le nom (ex: "Avril 2026")
         s_name = f"{sel_month} {sel_year}"
-        
+
         st.write(f"Saison à clôturer : **{s_name}**")
-        
+
         s_mode = st.radio("Mode à clôturer", ["Solo (1v1)", "Duo (2v2)", "Les deux"], horizontal=True)
-        
+
         st.warning("⚠️ Attention : Cette action est irréversible.")
-        
+
         if st.button("Confirmer la clôture et Reset les Elos", type="primary"):
             modes_to_process = []
             if s_mode == "Solo (1v1)": 
                 modes_to_process = ["1v1"]
             elif s_mode == "Duo (2v2)": 
                 modes_to_process = ["2v2"]
-            else: 
+            else:
                 modes_to_process = ["1v1", "2v2"]
-            
+
             success_count = 0
             for m in modes_to_process:
                 # On utilise le s_name construit proprement
@@ -2533,7 +1985,7 @@ elif page == "🔧 Panel Admin":
                     st.success(f"✅ {m} : {msg}")
                 else:
                     st.error(f"❌ {m} : {msg}")
-            
+
             if success_count > 0:
                 st.balloons()
                 st.rerun()
@@ -2553,12 +2005,13 @@ elif page == "🔧 Panel Admin":
                         for t in prof["unlocked_titles"]:
                             clean_t = t.replace("🏆 ", "").replace("🥈 ", "").replace("🥉 ", "").replace("🥇 ", "")
                             clean_titles.append(clean_t)
-                            if clean_t != t: has_changed = True
-                    
+                            if clean_t != t:
+                                has_changed = True
+
                     eq_title = prof.get("equipped_title")
                     if eq_title:
                         eq_title = eq_title.replace("🏆 ", "").replace("🥈 ", "").replace("🥉 ", "").replace("🥇 ", "")
-                        
+
                     if has_changed or eq_title != prof.get("equipped_title"):
                         db.supabase.table("profiles").update({"unlocked_titles": clean_titles, "equipped_title": eq_title}).eq("id", prof["id"]).execute()
 
@@ -2566,21 +2019,23 @@ elif page == "🔧 Panel Admin":
                 count_updates = 0
                 for m_db, m_lbl in [("1v1", "Solo"), ("2v2", "Duo")]:
                     arch_data = db.supabase.table("season_archives").select("*").eq("season_name", "Mars 2026").eq("mode", m_db).order("final_rank", desc=False).execute().data
-                    
+
                     for p in arch_data:
                         p_id = p["player_id"]
                         f_rank = p["final_rank"]
                         f_elo = p["final_elo"]
                         f_matches = p.get("matches_played", 0)
-                        
+
                         prof = db.supabase.table("profiles").select("unlocked_titles").eq("id", p_id).single().execute().data
-                        if not prof: continue
+                        if not prof:
+                            continue
                         titles = prof.get("unlocked_titles", [])
-                        if titles is None: titles = []
-                        
+                        if titles is None:
+                            titles = []
+
                         clean_titles = [t for t in titles if not ("Mars 2026" in t and (m_lbl in t or "Solo" not in t and "Duo" not in t))]
                         needs_update = False
-                        
+
                         if f_matches > 1:
                             r_name = "Novice"
                             for tier in reversed(RANK_TIERS):
@@ -2588,22 +2043,30 @@ elif page == "🔧 Panel Admin":
                                     r_name = tier["name"]
                                     break
                             r_title = f"{r_name} {m_lbl} Mars 2026"
-                            if r_title not in clean_titles: clean_titles.append(r_title); needs_update = True
-                                
+                            if r_title not in clean_titles:
+                                clean_titles.append(r_title)
+                                needs_update = True
+
                         if f_rank == 1:
                             c_title = f"Champion {m_lbl} de Mars 2026"
-                            if c_title not in clean_titles: clean_titles.append(c_title); needs_update = True
+                            if c_title not in clean_titles:
+                                clean_titles.append(c_title)
+                                needs_update = True
                         elif f_rank == 2:
                             d_title = f"Dauphin {m_lbl} de Mars 2026"
-                            if d_title not in clean_titles: clean_titles.append(d_title); needs_update = True
+                            if d_title not in clean_titles:
+                                clean_titles.append(d_title)
+                                needs_update = True
                         elif f_rank == 3:
                             p_title = f"3ème {m_lbl} de Mars 2026"
-                            if p_title not in clean_titles: clean_titles.append(p_title); needs_update = True
-                            
+                            if p_title not in clean_titles:
+                                clean_titles.append(p_title)
+                                needs_update = True
+
                         if needs_update or len(clean_titles) != len(titles):
                             db.supabase.table("profiles").update({"unlocked_titles": clean_titles}).eq("id", p_id).execute()
                             count_updates += 1
-                            
+
                 st.success(f"✅ Émojis supprimés et Titres propres distribués à {count_updates} joueurs !")
                 st.balloons()
             except Exception as e:
@@ -2611,19 +2074,19 @@ elif page == "🔧 Panel Admin":
 
 elif page == "🏟️ Grand Tournoi":
     st.header("🏟️ Espace Grand Tournoi")
-    
+
     # On sépare la vue Admin de la vue Spectateur
     is_admin = user.get("is_admin", False)
-    
+
     if is_admin:
         tab_spectator, tab_admin = st.tabs(["Historique des tournois", "🛠️ Panel Admin Tournoi"])
     else:
-        tab_spectator = st.container() # Le joueur normal ne voit que ça
-        
+        tab_spectator = st.container()  # Le joueur normal ne voit que ça
+
     # --- VUE SPECTATEUR (Publique) ---
     with tab_spectator:
         tournaments = db.get_grand_tournaments().data
-        
+
         if not tournaments:
             st.info("Aucun Grand Tournoi n'a été organisé pour le moment.")
         else:
@@ -2631,9 +2094,9 @@ elif page == "🏟️ Grand Tournoi":
             t_map_spec = {f"{t['name']}": t for t in tournaments}
             selected_t_spec_name = st.selectbox("Sélectionnez un tournoi à regarder :", list(t_map_spec.keys()), key="spec_select")
             selected_t_spec = t_map_spec[selected_t_spec_name]
-            
+
             st.divider()
-            
+
             # Affichage de l'en-tête du tournoi
             status_map = {
                 "draft": "🛠️ En préparation",
@@ -2643,23 +2106,23 @@ elif page == "🏟️ Grand Tournoi":
             }
             st.markdown(f"### {selected_t_spec['name']}")
             st.caption(f"Statut : {status_map.get(selected_t_spec['status'], 'Inconnu')} | Format : {selected_t_spec['format']}")
-            
+
             # --- CAS 1 : BROUILLON ---
             if selected_t_spec["status"] == "draft":
                 st.info("Les inscriptions et le tirage des poules sont en cours. Revenez plus tard !")
-                
+
             # --- CAS 2 & 3 : POULES ET ARBRE ---
             if selected_t_spec["status"] in ["groups", "bracket", "completed"]:
                 st.markdown("#### 📊 Phase de Poules")
                 matches_grp = db.get_gt_matches(selected_t_spec["id"], "group").data
                 parts = db.get_tournament_participants(selected_t_spec["id"]).data
                 all_users_spec = {p["id"]: p["username"] for p in db.get_leaderboard().data}
-                
+
                 if not parts:
                     st.write("Aucune poule générée.")
                 else:
                     group_letters = sorted(list(set([p["group_name"] for p in parts if p["group_name"]])))
-                    
+
                     # Utilisation d'onglets pour une navigation mobile fluide
                     if group_letters:
                         tabs_poules = st.tabs([f"Poule {g}" for g in group_letters])
@@ -2667,45 +2130,51 @@ elif page == "🏟️ Grand Tournoi":
                             with tabs_poules[idx]:
                                 g_matches = [m for m in matches_grp if m["group_name"] == g]
                                 g_parts = [p for p in parts if p["group_name"] == g]
-                                
+
                                 # 1. On sépare les rounds
                                 max_round = max([m.get("tie_break_round", 0) for m in g_matches]) if g_matches else 0
                                 regular_matches = [m for m in g_matches if m.get("tie_break_round", 0) == 0]
-                                
+
                                 # ==========================================
                                 # 2. CLASSEMENT PHASE RÉGULIÈRE
                                 # ==========================================
                                 reg_standings = {}
                                 for p in g_parts:
                                     reg_standings[p["user_id"]] = {"Nom": all_users_spec.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0, "Tie_V": 0, "Tie_Diff": 0}
-                                    
+
                                 for m in regular_matches:
                                     if m["status"] == "completed":
                                         s1, s2 = m["score1"], m["score2"]
                                         p1, p2 = m["player1_id"], m["player2_id"]
                                         if p1 in reg_standings:
-                                            if s1 > s2: reg_standings[p1]["V"] += 1
-                                            else: reg_standings[p1]["D"] += 1
+                                            if s1 > s2:
+                                                reg_standings[p1]["V"] += 1
+                                            else:
+                                                reg_standings[p1]["D"] += 1
                                             reg_standings[p1]["Diff"] += (s1 - s2)
                                         if p2 in reg_standings:
-                                            if s2 > s1: reg_standings[p2]["V"] += 1
-                                            else: reg_standings[p2]["D"] += 1
+                                            if s2 > s1:
+                                                reg_standings[p2]["V"] += 1
+                                            else:
+                                                reg_standings[p2]["D"] += 1
                                             reg_standings[p2]["Diff"] += (s2 - s1)
-                                            
+
                                 tie_matches_all = [m for m in g_matches if m.get("tie_break_round", 0) > 0]
                                 for m in tie_matches_all:
                                     if m["status"] == "completed":
                                         s1, s2 = m["score1"], m["score2"]
                                         p1, p2 = m["player1_id"], m["player2_id"]
                                         if p1 in reg_standings:
-                                            if s1 > s2: reg_standings[p1]["Tie_V"] += 1
+                                            if s1 > s2:
+                                                reg_standings[p1]["Tie_V"] += 1
                                             reg_standings[p1]["Tie_Diff"] += (s1 - s2)
                                         if p2 in reg_standings:
-                                            if s2 > s1: reg_standings[p2]["Tie_V"] += 1
+                                            if s2 > s1:
+                                                reg_standings[p2]["Tie_V"] += 1
                                             reg_standings[p2]["Tie_Diff"] += (s2 - s1)
 
                                 sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"], x["Tie_V"], x["Tie_Diff"]), reverse=True)
-                                
+
                                 # --- NOUVEAU DESIGN VIP ---
                                 display_reg = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_reg)]
                                 st.markdown(draw_luxury_table(display_reg, "📊 Classement Phase Régulière"), unsafe_allow_html=True)
@@ -2717,28 +2186,34 @@ elif page == "🏟️ Grand Tournoi":
                                     tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
                                     tie_players = set()
                                     for m in tie_matches:
-                                        if m["player1_id"]: tie_players.add(m["player1_id"])
-                                        if m["player2_id"]: tie_players.add(m["player2_id"])
-                                        
+                                        if m["player1_id"]:
+                                            tie_players.add(m["player1_id"])
+                                        if m["player2_id"]:
+                                            tie_players.add(m["player2_id"])
+
                                     tie_standings = {}
                                     for uid in tie_players:
                                         tie_standings[uid] = {"Nom": all_users_spec.get(uid, "?"), "V": 0, "D": 0, "Diff": 0}
-                                        
+
                                     for m in tie_matches:
                                         if m["status"] == "completed":
                                             s1, s2 = m["score1"], m["score2"]
                                             p1, p2 = m["player1_id"], m["player2_id"]
                                             if p1 in tie_standings:
-                                                if s1 > s2: tie_standings[p1]["V"] += 1
-                                                else: tie_standings[p1]["D"] += 1
+                                                if s1 > s2:
+                                                    tie_standings[p1]["V"] += 1
+                                                else:
+                                                    tie_standings[p1]["D"] += 1
                                                 tie_standings[p1]["Diff"] += (s1 - s2)
                                             if p2 in tie_standings:
-                                                if s2 > s1: tie_standings[p2]["V"] += 1
-                                                else: tie_standings[p2]["D"] += 1
+                                                if s2 > s1:
+                                                    tie_standings[p2]["V"] += 1
+                                                else:
+                                                    tie_standings[p2]["D"] += 1
                                                 tie_standings[p2]["Diff"] += (s2 - s1)
-                                                
+
                                     sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
-                                    
+
                                     # --- NOUVEAU DESIGN VIP ---
                                     display_tie = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_tie)]
                                     st.markdown(draw_luxury_table(display_tie, f"🔥 Départage (Round {max_round})"), unsafe_allow_html=True)
@@ -2748,21 +2223,22 @@ elif page == "🏟️ Grand Tournoi":
                                 # ==========================================
                                 st.write("")
                                 st.markdown("<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25; border-bottom: 1px solid rgba(198,156,37,0.3); padding-bottom: 10px; margin-bottom: 15px;\">🎱 Matchs de la Poule</h4>", unsafe_allow_html=True)
-                                
+
                                 for r in range(max_round + 1):
                                     r_matches = [m for m in g_matches if m.get("tie_break_round", 0) == r]
-                                    if not r_matches: continue
-                                    
+                                    if not r_matches:
+                                        continue
+
                                     if max_round > 0:
                                         round_title = "Phase Régulière" if r == 0 else f"Barrages #{r}"
                                         st.markdown(f"<div style='color: #C69C25; font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; margin-bottom: 10px; font-weight: 600;'>{round_title}</div>", unsafe_allow_html=True)
-                                            
+
                                     for m in r_matches:
                                         p1_name = all_users_spec.get(m["player1_id"], "?")
                                         p2_name = all_users_spec.get(m["player2_id"], "?")
-                                        
+
                                         match_html = "<div style='display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(0,0,0,0.2); border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #C69C25;'>"
-                                        
+
                                         if m["status"] == "completed":
                                             match_html += f"<div style='flex: 1; text-align: right; font-weight: 600;'>{p1_name}</div>"
                                             match_html += f"<div style='flex: 0 0 80px; text-align: center; color: #C69C25; font-family: \"Playfair Display\", serif; font-size: 1.3em; font-weight: bold;'>{m['score1']} - {m['score2']}</div>"
@@ -2771,7 +2247,7 @@ elif page == "🏟️ Grand Tournoi":
                                             match_html += f"<div style='flex: 1; text-align: right; font-weight: 600; opacity: 0.7;'>{p1_name}</div>"
                                             match_html += "<div style='flex: 0 0 80px; text-align: center; color: #555; font-size: 0.9em; font-style: italic;'>vs ⏳</div>"
                                             match_html += f"<div style='flex: 1; text-align: left; font-weight: 600; opacity: 0.7;'>{p2_name}</div>"
-                                            
+
                                         match_html += "</div>"
                                         st.markdown(match_html, unsafe_allow_html=True)
 
@@ -2779,9 +2255,9 @@ elif page == "🏟️ Grand Tournoi":
             if selected_t_spec["status"] in ["bracket", "completed"]:
                 st.divider()
                 st.markdown("#### 🌳 Phase Finale (Arbre)")
-                
+
                 matches_brk = db.get_gt_matches(selected_t_spec["id"], "bracket").data
-                
+
                 if not matches_brk:
                     st.info("L'arbre est en cours de construction.")
                 else:
@@ -2789,7 +2265,7 @@ elif page == "🏟️ Grand Tournoi":
                     nb_matches_r1 = 8 if "32" in selected_t_spec["format"] else 16
                     total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
                     is_double_elim = "double" in selected_t_spec["format"]
-                    
+
                     # LA SOLUTION DÉFINITIVE : Génération d'un arbre HTML/Flexbox
                     def render_css_bracket(prefix, title):
                         tier_matches = [m for m in matches_brk if m["bracket_match_id"].startswith(prefix)]
@@ -2799,24 +2275,24 @@ elif page == "🏟️ Grand Tournoi":
                         def get_match_card(r_num, m_num, is_gf=False, is_pf=False):
                             b_id = f"{prefix}_R{r_num}_M{m_num}"
                             m = tier_dict.get(b_id)
-                            
+
                             # --- DESIGN SNOOK'R VIP ---
-                            bg_color = "rgba(15, 23, 42, 0.9)" # Bleu nuit profond
+                            bg_color = "rgba(15, 23, 42, 0.9)"  # Bleu nuit profond
                             border_color = "#C69C25" if is_gf else ("#CD7F32" if is_pf else "rgba(198, 156, 37, 0.4)")
-                            
+
                             c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
                             c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
-                            
+
                             if m:
                                 p1 = all_users_spec.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
                                 p2 = all_users_spec.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
                                 s1, s2 = m.get("score1", 0), m.get("score2", 0)
-                                
+
                                 if m["status"] == "completed":
-                                    podium_1_c = "#C69C25" # Or Snook'R
-                                    podium_2_c = "#E0FFFF" # Argent
-                                    podium_3_c = "#CD7F32" # Bronze
-                                    
+                                    podium_1_c = "#C69C25"  # Or Snook'R
+                                    podium_2_c = "#E0FFFF"  # Argent
+                                    podium_3_c = "#CD7F32"  # Bronze
+
                                     if is_gf:
                                         w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
                                         w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
@@ -2830,24 +2306,25 @@ elif page == "🏟️ Grand Tournoi":
                                     else:
                                         w1 = "bold; color: white;" if s1 > s2 else "normal; color: #888;"
                                         w2 = "bold; color: white;" if s2 > s1 else "normal; color: #888;"
-                                        c1_score = "#C69C25" if s1 > s2 else "#888" # Score gagnant en Or
+                                        c1_score = "#C69C25" if s1 > s2 else "#888"  # Score gagnant en Or
                                         c2_score = "#C69C25" if s2 > s1 else "#888"
                                 else:
                                     w1 = w2 = "normal; color: white;"
                                     c1_score = c2_score = "transparent"
-                                    if p1 == "..." and p2 == "...": s1 = s2 = ""
-                                    
+                                    if p1 == "..." and p2 == "...":
+                                        s1 = s2 = ""
+
                                 c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
                                 c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
                             else:
                                 c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div>"
                                 c_html += "<div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
-                            
+
                             c_html += "</div>"
                             return c_html
 
                         html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
-                        
+
                         # --- 1. DOUBLE ÉLIMINATION ou LOSER BRACKET (Classique de gauche à droite) ---
                         if is_double_elim or prefix == "LB":
                             has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches_brk)
@@ -2859,21 +2336,24 @@ elif page == "🏟️ Grand Tournoi":
                             html += f"<div style='display: flex; flex-direction: row; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: {'600px' if prefix == 'WB' else '400px'};'>"
                             for r_num in range(1, num_rounds + 1):
                                 html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin-right: 30px;'>"
-                                
+
                                 is_final_col = (prefix == "WB" and r_num == total_rounds_wb + 1)
-                                
-                                if is_final_col: col_title = "👑 Grande Finale"
-                                elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Bracket Reset"
-                                else: col_title = f"Tour {r_num}"
+
+                                if is_final_col:
+                                    col_title = "👑 Grande Finale"
+                                elif prefix == "WB" and r_num == total_rounds_wb + 2:
+                                    col_title = "⚔️ Bracket Reset"
+                                else:
+                                    col_title = f"Tour {r_num}"
                                 html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
-                                
+
                                 if prefix == "WB":
                                     virtual_round = min(r_num, total_rounds_wb)
                                     expected_count = max(1, nb_matches_r1 // (2**(virtual_round-1)))
                                 else:
                                     virtual_round = math.ceil(r_num / 2)
                                     expected_count = max(1, nb_matches_r1 // (2**virtual_round))
-                                    
+
                                 html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(1, expected_count + 1):
                                     is_gf = (prefix == "WB" and r_num > total_rounds_wb)
@@ -2881,11 +2361,11 @@ elif page == "🏟️ Grand Tournoi":
 
                                 html += "</div></div>"
                             html += "</div>"
-                            
+
                         # --- 2. SINGLE ÉLIMINATION (Format Symétrique Papillon) ---
                         else:
                             html += "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: 400px;'>"
-                            
+
                             # A. PARTIE GAUCHE
                             html += "<div style='display: flex; flex-direction: row;'>"
                             for r_num in range(1, total_rounds_wb):
@@ -2898,22 +2378,22 @@ elif page == "🏟️ Grand Tournoi":
                                     html += get_match_card(r_num, m_num)
                                 html += "</div></div>"
                             html += "</div>"
-                            
+
                             # B. CENTRE (Grande Finale + Petite Finale)
                             html += "<div style='display: flex; flex-direction: column; justify-content: center; flex: 0 0 220px; margin: 0 10px; gap: 40px;'>"
-                            
+
                             html += "<div>"
                             html += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
                             html += get_match_card(total_rounds_wb, 1, is_gf=True)
                             html += "</div>"
-                            
+
                             html += "<div>"
                             html += "<div style='text-align: center; color: #CD7F32; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>🥉 Petite Finale</div>"
                             html += get_match_card(total_rounds_wb, 2, is_gf=False, is_pf=True)
                             html += "</div>"
-                            
+
                             html += "</div>"
-                            
+
                             # C. PARTIE DROITE (On inverse l'ordre !)
                             html += "<div style='display: flex; flex-direction: row-reverse;'>"
                             for r_num in range(1, total_rounds_wb):
@@ -2926,14 +2406,14 @@ elif page == "🏟️ Grand Tournoi":
                                     html += get_match_card(r_num, m_num)
                                 html += "</div></div>"
                             html += "</div>"
-                            
+
                             html += "</div>"
-                        
+
                         return html
 
                     # Affichage via la fonction markdown HTML
                     st.markdown(render_css_bracket("WB", "🏆 L'Arbre du Tournoi"), unsafe_allow_html=True)
-                    
+
                     if is_double_elim:
                         st.divider()
                         st.markdown(render_css_bracket("LB", "💀 Loser Bracket (Repêchages)"), unsafe_allow_html=True)
@@ -2942,14 +2422,14 @@ elif page == "🏟️ Grand Tournoi":
     if is_admin:
         with tab_admin:
             st.header("⚙️ Administration des Tournois")
-            
+
             # --- OUTIL : CRÉATION DE FANTÔMES ---
             with st.expander("👻 Créer un Joueur Fantôme (Pour les archives)"):
                 st.info("Ces joueurs apparaîtront dans la liste pour pouvoir être ajoutés à un tournoi, mais ils n'auront pas de compte pour se connecter et n'impacteront pas le classement général.")
-                
+
                 c1, c2 = st.columns([3, 1])
                 ghost_name = c1.text_input("Prénom et Nom du joueur", placeholder="Ex: Paul Dupont", label_visibility="collapsed")
-                
+
                 if c2.button("Créer le joueur", use_container_width=True):
                     if len(ghost_name) < 3:
                         st.error("Le nom doit contenir au moins 3 caractères.")
@@ -2966,27 +2446,27 @@ elif page == "🏟️ Grand Tournoi":
             # --- OUTIL : FUSION FANTÔME -> VRAI JOUEUR ---
             with st.expander("🔄 Remplacer un Fantôme par un Vrai Joueur"):
                 st.info("Transférez tout l'historique d'un profil fantôme vers le vrai compte d'un joueur qui vient de s'inscrire, puis supprimez le fantôme.")
-                
+
                 all_profiles = db.get_all_profiles().data
                 all_profiles = sorted(all_profiles, key=lambda x: x["username"].lower() if x.get("username") else "")
-                
-                ghost_profiles = [p for p in all_profiles if p.get("is_ghost") == True]
-                real_profiles = [p for p in all_profiles if p.get("is_ghost") != True]
-                
+
+                ghost_profiles = [p for p in all_profiles if p.get("is_ghost") is True]
+                real_profiles = [p for p in all_profiles if p.get("is_ghost") is not True]
+
                 ghost_map = {f"{p['username']} ({p['id'][:4]})": p["id"] for p in ghost_profiles if p.get("username")}
                 real_map = {f"{p['username']} ({p['id'][:4]})": p["id"] for p in real_profiles if p.get("username")}
-                
+
                 c1, c2 = st.columns(2)
                 ghost_choice = c1.selectbox("1. Le profil Fantôme (à supprimer)", ["-- Sélectionner --"] + list(ghost_map.keys()), key="merge_ghost")
                 real_choice = c2.selectbox("2. Le Vrai Compte (qui récupère l'historique)", ["-- Sélectionner --"] + list(real_map.keys()), key="merge_real")
-                
+
                 if st.button("Fusionner et Remplacer", use_container_width=True, type="primary"):
                     if ghost_choice == "-- Sélectionner --" or real_choice == "-- Sélectionner --":
                         st.error("Veuillez sélectionner les deux profils à fusionner.")
                     else:
                         ghost_id = ghost_map[ghost_choice]
                         real_id = real_map[real_choice]
-                        
+
                         success, msg = db.merge_ghost_to_real(ghost_id, real_id)
                         if success:
                             st.success(msg)
@@ -3003,7 +2483,7 @@ elif page == "🏟️ Grand Tournoi":
                     "64_single",
                     "32_double"
                 ])
-                
+
                 if st.form_submit_button("Créer le tournoi (Brouillon)"):
                     if not t_name:
                         st.error("Veuillez donner un nom au tournoi.")
@@ -3016,10 +2496,10 @@ elif page == "🏟️ Grand Tournoi":
                             st.error(data_or_err)
 
             st.divider()
-            
+
             # --- 2. GESTION DES TOURNOIS EXISTANTS ---
             st.subheader("2. Gérer un tournoi existant")
-            
+
             if not tournaments:
                 st.write("Aucun tournoi à gérer pour le moment.")
             else:
@@ -3032,11 +2512,11 @@ elif page == "🏟️ Grand Tournoi":
                 # ==========================================
                 if selected_t["status"] == "draft":
                     st.info("📝 Ce tournoi est en préparation. Constituez vos poules !")
-                    
+
                     all_app_users = db.get_all_profiles().data
                     all_app_users = sorted(all_app_users, key=lambda x: x["username"].lower() if x.get("username") else "")
                     user_options = {p["username"]: p["id"] for p in all_app_users if p.get("username")}
-                    
+
                     existing_parts = db.get_tournament_participants(selected_t["id"]).data
                     current_groups = {}
                     for ep in existing_parts:
@@ -3051,7 +2531,7 @@ elif page == "🏟️ Grand Tournoi":
                     group_letters = [chr(65+i) for i in range(nb_groups)]
 
                     st.write("Sélectionnez les joueurs pour chaque poule (4 conseillés).")
-                    
+
                     for g in group_letters:
                         key = f"draft_{selected_t['id']}_{g}"
                         if key not in st.session_state:
@@ -3064,23 +2544,23 @@ elif page == "🏟️ Grand Tournoi":
 
                     cols = st.columns(2)
                     selections = {}
-                    
+
                     for i, g in enumerate(group_letters):
                         col = cols[i % 2]
                         key = f"draft_{selected_t['id']}_{g}"
-                        
+
                         available_players = [
                             p for p in user_options 
                             if p not in all_selected_players or p in st.session_state[key]
                         ]
-                        
+
                         selections[g] = col.multiselect(
                             f"Poule {g}", 
                             options=available_players, 
                             key=key,
                             max_selections=5
                         )
-                        
+
                     if st.button("💾 Sauvegarder les poules"):
                         flat_data = []
                         for g, unames in selections.items():
@@ -3089,7 +2569,7 @@ elif page == "🏟️ Grand Tournoi":
                                     "user_id": user_options[uname],
                                     "group_name": g
                                 })
-                        
+
                         success, msg = db.save_tournament_groups(selected_t["id"], flat_data)
                         if success:
                             st.success(msg)
@@ -3109,51 +2589,55 @@ elif page == "🏟️ Grand Tournoi":
                             st.success("Le tournoi est lancé ! Les matchs de poule sont générés.")
                             st.balloons()
                             st.rerun()
-                            
+
                 # ==========================================
                 # PHASE : POULES (SAISIE DES SCORES)
                 # ==========================================
                 elif selected_t["status"] == "groups":
                     st.success("🟢 Phase de poules en cours.")
-                    
+
                     matches = db.get_gt_matches(selected_t["id"], "group").data
                     participants = db.get_tournament_participants(selected_t["id"]).data
                     all_users = {p["id"]: p["username"] for p in db.get_all_profiles().data}
-                    
+
                     group_letters = sorted(list(set([m["group_name"] for m in matches])))
-                    
+
                     for g in group_letters:
                         with st.expander(f"📊 Gestion de la Poule {g}", expanded=True):
                             g_matches = [m for m in matches if m["group_name"] == g]
                             g_parts = [p for p in participants if p["group_name"] == g]
-                            
+
                             # 1. On sépare les matchs réguliers des matchs de barrage
                             max_round = max([m.get("tie_break_round", 0) for m in g_matches]) if g_matches else 0
                             regular_matches = [m for m in g_matches if m.get("tie_break_round", 0) == 0]
                             current_round_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
-                            
+
                             # ==========================================
                             # 2. CLASSEMENT DE LA PHASE RÉGULIÈRE (Intouchable !)
                             # ==========================================
                             reg_standings = {}
                             for p in g_parts:
                                 reg_standings[p["user_id"]] = {"Nom": all_users.get(p["user_id"], "?"), "V": 0, "D": 0, "Diff": 0}
-                                
+
                             for m in regular_matches:
                                 if m["status"] == "completed":
                                     s1, s2 = m["score1"], m["score2"]
                                     p1, p2 = m["player1_id"], m["player2_id"]
                                     if p1 in reg_standings:
-                                        if s1 > s2: reg_standings[p1]["V"] += 1
-                                        else: reg_standings[p1]["D"] += 1
+                                        if s1 > s2:
+                                            reg_standings[p1]["V"] += 1
+                                        else:
+                                            reg_standings[p1]["D"] += 1
                                         reg_standings[p1]["Diff"] += (s1 - s2)
                                     if p2 in reg_standings:
-                                        if s2 > s1: reg_standings[p2]["V"] += 1
-                                        else: reg_standings[p2]["D"] += 1
+                                        if s2 > s1:
+                                            reg_standings[p2]["V"] += 1
+                                        else:
+                                            reg_standings[p2]["D"] += 1
                                         reg_standings[p2]["Diff"] += (s2 - s1)
-                            
+
                             sorted_reg = sorted(reg_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
-                            
+
                             # --- NOUVEAU DESIGN VIP ---
                             display_reg = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_reg)]
                             st.markdown(draw_luxury_table(display_reg, "📊 Classement Phase Régulière"), unsafe_allow_html=True)
@@ -3163,60 +2647,67 @@ elif page == "🏟️ Grand Tournoi":
                             # ==========================================
                             if max_round > 0:
                                 tie_matches = [m for m in g_matches if m.get("tie_break_round", 0) == max_round]
-                                
+
                                 tie_players = set()
                                 for m in tie_matches:
-                                    if m["player1_id"]: tie_players.add(m["player1_id"])
-                                    if m["player2_id"]: tie_players.add(m["player2_id"])
-                                    
+                                    if m["player1_id"]:
+                                        tie_players.add(m["player1_id"])
+                                    if m["player2_id"]:
+                                        tie_players.add(m["player2_id"])
+
                                 tie_standings = {}
                                 for uid in tie_players:
                                     tie_standings[uid] = {"Nom": all_users.get(uid, "?"), "V": 0, "D": 0, "Diff": 0}
-                                    
+
                                 for m in tie_matches:
                                     if m["status"] == "completed":
                                         s1, s2 = m["score1"], m["score2"]
                                         p1, p2 = m["player1_id"], m["player2_id"]
                                         if p1 in tie_standings:
-                                            if s1 > s2: tie_standings[p1]["V"] += 1
-                                            else: tie_standings[p1]["D"] += 1
+                                            if s1 > s2:
+                                                tie_standings[p1]["V"] += 1
+                                            else:
+                                                tie_standings[p1]["D"] += 1
                                             tie_standings[p1]["Diff"] += (s1 - s2)
                                         if p2 in tie_standings:
-                                            if s2 > s1: tie_standings[p2]["V"] += 1
-                                            else: tie_standings[p2]["D"] += 1
+                                            if s2 > s1:
+                                                tie_standings[p2]["V"] += 1
+                                            else:
+                                                tie_standings[p2]["D"] += 1
                                             tie_standings[p2]["Diff"] += (s2 - s1)
-                                            
+
                                 sorted_tie = sorted(tie_standings.values(), key=lambda x: (x["V"], x["Diff"]), reverse=True)
-                                
+
                                 # --- NOUVEAU DESIGN VIP ---
                                 display_tie = [{"Rang": i+1, "Joueur": x["Nom"], "V": x["V"], "D": x["D"], "Diff": x["Diff"]} for i, x in enumerate(sorted_tie)]
                                 st.markdown(draw_luxury_table(display_tie, f"🔥 Classement du Départage (Round {max_round})"), unsafe_allow_html=True)
 
                             st.divider()
                             st.markdown("<h4 style=\"font-family: 'Playfair Display', serif; color: #C69C25;\">✏️ Saisie des Matchs</h4>", unsafe_allow_html=True)
-                            
+
                             # 3. Affichage visuel séparé par Round (Régulier vs Barrages)
                             for r in range(max_round + 1):
                                 r_matches = [m for m in g_matches if m.get("tie_break_round", 0) == r]
-                                if not r_matches: continue
-                                
+                                if not r_matches:
+                                    continue
+
                                 if r == 0:
                                     st.markdown("🎯 *Phase Régulière*")
                                 else:
                                     st.markdown(f"🔥 **Matchs de Barrage #{r}**")
-                                    
+
                                 for m in r_matches:
                                     p1_name = all_users.get(m["player1_id"], "?")
                                     p2_name = all_users.get(m["player2_id"], "?")
                                     is_done = m["status"] == "completed"
-                                    
+
                                     c1, c2, c3, c4, c5 = st.columns([3, 1, 0.5, 1, 2])
                                     c1.write(f"**{p1_name}** vs **{p2_name}**" + (" ✅" if is_done else ""))
-                                    
+
                                     score1 = c2.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"s1_{m['id']}", label_visibility="collapsed")
                                     c3.write("-")
                                     score2 = c4.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"s2_{m['id']}", label_visibility="collapsed")
-                                    
+
                                     btn_label = "Mettre à jour" if is_done else "Valider"
                                     if c5.button(btn_label, key=f"btn_{m['id']}"):
                                         if score1 == score2:
@@ -3235,9 +2726,9 @@ elif page == "🏟️ Grand Tournoi":
                                     success, msg = db.check_and_create_tie_breaks(selected_t["id"], g)
                                     if success:
                                         if "générés" in msg.lower():
-                                            st.error(msg) # S'affiche en rouge pour alerter l'admin qu'il y a des barrages !
+                                            st.error(msg)  # S'affiche en rouge pour alerter l'admin qu'il y a des barrages !
                                         else:
-                                            st.success(msg) # S'affiche en vert : la poule est saine.
+                                            st.success(msg)  # S'affiche en vert : la poule est saine.
                                         st.rerun()
                                     else:
                                         st.warning(msg)
@@ -3248,29 +2739,31 @@ elif page == "🏟️ Grand Tournoi":
                     st.divider()
                     st.subheader("🎲 Tirage au sort de la Phase Finale")
                     st.info("Une fois TOUS les matchs de poule terminés, faites votre tirage au sort physique et saisissez les rencontres ci-dessous. Seuls les 2 premiers de chaque poule sont sélectionnables.")
-                    
+
                     qualified_players = []
                     for g in group_letters:
                         g_matches = [m for m in matches if m["group_name"] == g]
                         g_parts = [p for p in participants if p["group_name"] == g]
                         temp_standings = {p["user_id"]: {"V": 0, "Diff": 0} for p in g_parts}
-                        
+
                         for m in g_matches:
                             if m["status"] == "completed":
                                 s1, s2 = m["score1"], m["score2"]
                                 p1, p2 = m["player1_id"], m["player2_id"]
                                 if p1 in temp_standings:
-                                    if s1 > s2: temp_standings[p1]["V"] += 1
+                                    if s1 > s2:
+                                        temp_standings[p1]["V"] += 1
                                     temp_standings[p1]["Diff"] += (s1 - s2)
                                 if p2 in temp_standings:
-                                    if s2 > s1: temp_standings[p2]["V"] += 1
+                                    if s2 > s1:
+                                        temp_standings[p2]["V"] += 1
                                     temp_standings[p2]["Diff"] += (s2 - s1)
-                                    
+
                         sorted_uids = sorted(temp_standings.keys(), key=lambda uid: (temp_standings[uid]["V"], temp_standings[uid]["Diff"]), reverse=True)
                         qualified_players.extend(sorted_uids[:2])
-                    
+
                     nb_matches_r1 = 8 if "32" in selected_t["format"] else 16
-                    
+
                     for i in range(nb_matches_r1):
                         if f"r1_m{i}_p1_{selected_t['id']}" not in st.session_state:
                             st.session_state[f"r1_m{i}_p1_{selected_t['id']}"] = None
@@ -3281,27 +2774,29 @@ elif page == "🏟️ Grand Tournoi":
                     for i in range(nb_matches_r1):
                         val_p1 = st.session_state.get(f"r1_m{i}_p1_{selected_t['id']}")
                         val_p2 = st.session_state.get(f"r1_m{i}_p2_{selected_t['id']}")
-                        if val_p1: all_selected_in_draw.add(val_p1)
-                        if val_p2: all_selected_in_draw.add(val_p2)
+                        if val_p1:
+                            all_selected_in_draw.add(val_p1)
+                        if val_p2:
+                            all_selected_in_draw.add(val_p2)
 
                     st.markdown("#### 🗺️ Cartographie de l'arbre")
                     st.info("Utilisez ce plan pour savoir où placer vos joueurs. Les vainqueurs se dirigent vers le centre.")
-                    
+
                     # --- DESSIN DU SQUELETTE DE L'ARBRE ---
                     with st.container(border=True):
                         import math
                         nb_matches_r1 = 8 if "32" in selected_t["format"] else 16
                         total_rounds_wb = int(math.log2(nb_matches_r1)) + 1
                         is_double_elim = "double" in selected_t["format"]
-                        
+
                         html_map = "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 10px; zoom: 0.85;'>"
-                        
+
                         if is_double_elim:
                             html_map += "<div style='display: flex; flex-direction: row;'>"
                             for r_num in range(1, total_rounds_wb + 1):
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 140px; margin-right: 15px;'>"
                                 html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
-                                
+
                                 expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(1, expected_count + 1):
@@ -3311,17 +2806,17 @@ elif page == "🏟️ Grand Tournoi":
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 15px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 14px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
                             html_map += "</div>"
-                            
+
                         else:
                             # 1. GAUCHE
                             html_map += "<div style='display: flex; flex-direction: row;'>"
                             for r_num in range(1, total_rounds_wb):
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 120px; margin: 0 10px;'>"
                                 html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
-                                
+
                                 expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
                                 half_count = expected_count // 2
-                                
+
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(1, half_count + 1):
                                     bg_color = "rgba(198, 156, 37, 0.2)" if r_num == 1 else "rgba(15, 23, 42, 0.5)"
@@ -3330,7 +2825,7 @@ elif page == "🏟️ Grand Tournoi":
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
                             html_map += "</div>"
-                            
+
                             # 2. CENTRE
                             html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 140px; margin: 0 15px;'>"
                             html_map += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px;'>👑 Finale</div>"
@@ -3343,10 +2838,10 @@ elif page == "🏟️ Grand Tournoi":
                             for r_num in range(1, total_rounds_wb):
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 120px; margin: 0 10px;'>"
                                 html_map += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px;'>Tour {r_num}</div>"
-                                
+
                                 expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
                                 half_count = expected_count // 2
-                                
+
                                 html_map += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                 for m_num in range(half_count + 1, expected_count + 1):
                                     bg_color = "rgba(198, 156, 37, 0.2)" if r_num == 1 else "rgba(15, 23, 42, 0.5)"
@@ -3355,7 +2850,7 @@ elif page == "🏟️ Grand Tournoi":
                                     html_map += f"<div style='background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 10px 5px; text-align: center; margin: 4px 0;'><strong style='color: {text_color}; font-size: 13px;'>Match {m_num}</strong></div>"
                                 html_map += "</div></div>"
                             html_map += "</div>"
-                            
+
                         html_map += "</div>"
                         st.markdown(html_map, unsafe_allow_html=True)
                     st.divider()
@@ -3363,15 +2858,15 @@ elif page == "🏟️ Grand Tournoi":
                     # 4. Interface du Tirage
                     selections = []
                     cols = st.columns(2)
-                    
+
                     for i in range(nb_matches_r1):
                         col = cols[i % 2]
                         with col.container(border=True):
                             st.markdown(f"**Match {i+1}**")
-                            
+
                             curr_p1 = st.session_state.get(f"r1_m{i}_p1_{selected_t['id']}")
                             avail_p1 = [p for p in qualified_players if p not in all_selected_in_draw or p == curr_p1]
-                            
+
                             p1 = st.selectbox(
                                 "Joueur 1", 
                                 options=avail_p1, 
@@ -3380,10 +2875,10 @@ elif page == "🏟️ Grand Tournoi":
                                 key=f"r1_m{i}_p1_{selected_t['id']}",
                                 placeholder="Sélectionner..."
                             )
-                            
+
                             curr_p2 = st.session_state.get(f"r1_m{i}_p2_{selected_t['id']}")
                             avail_p2 = [p for p in qualified_players if p not in all_selected_in_draw or p == curr_p2]
-                            
+
                             p2 = st.selectbox(
                                 "Joueur 2", 
                                 options=avail_p2, 
@@ -3393,7 +2888,7 @@ elif page == "🏟️ Grand Tournoi":
                                 placeholder="Sélectionner..."
                             )
                             selections.append((p1, p2))
-                            
+
                     st.write("")
                     if st.button("⚔️ Valider le Tirage et Lancer l'Arbre", type="primary"):
                         if any(p1 is None or p2 is None for p1, p2 in selections):
@@ -3407,7 +2902,7 @@ elif page == "🏟️ Grand Tournoi":
                                 for i in range(nb_matches_r1):
                                     st.session_state.pop(f"r1_m{i}_p1_{selected_t['id']}", None)
                                     st.session_state.pop(f"r1_m{i}_p2_{selected_t['id']}", None)
-                                    
+
                                 st.success("Tirage au sort validé ! Transition vers l'arbre final...")
                                 st.balloons()
                                 st.rerun()
@@ -3417,10 +2912,10 @@ elif page == "🏟️ Grand Tournoi":
                 # ==========================================
                 elif selected_t["status"] == "bracket":
                     st.success("⚔️ Phase finale en cours !")
-                    
+
                     matches = db.get_gt_matches(selected_t["id"], "bracket").data
                     all_users = {p["id"]: p["username"] for p in db.get_all_profiles().data}
-                    
+
                     if not matches:
                         st.error("Aucun match d'arbre trouvé.")
                     else:
@@ -3434,28 +2929,28 @@ elif page == "🏟️ Grand Tournoi":
                             def render_css_bracket_admin(prefix, title):
                                 tier_matches = [m for m in matches if m["bracket_match_id"].startswith(prefix)]
                                 tier_dict = {m["bracket_match_id"]: m for m in tier_matches}
-                                
+
                                 def get_match_card_admin(r_num, m_num, is_gf=False, is_pf=False):
                                     b_id = f"{prefix}_R{r_num}_M{m_num}"
                                     m = tier_dict.get(b_id)
-                                    
+
                                     # --- DESIGN SNOOK'R VIP ---
                                     bg_color = "rgba(15, 23, 42, 0.9)"
                                     border_color = "#C69C25" if is_gf else ("#CD7F32" if is_pf else "rgba(198, 156, 37, 0.4)")
-                                    
+
                                     c_html = f"<div style='background: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin: 5px 0;'>"
                                     c_html += f"<div style='font-size: 10px; color: rgba(198, 156, 37, 0.7); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>Match {m_num}</div>"
-                                    
+
                                     if m:
                                         p1 = all_users.get(m.get("player1_id"), "...") if m.get("player1_id") else "..."
                                         p2 = all_users.get(m.get("player2_id"), "...") if m.get("player2_id") else "..."
                                         s1, s2 = m.get("score1", 0), m.get("score2", 0)
-                                        
+
                                         if m["status"] == "completed":
                                             podium_1_c = "#C69C25"
                                             podium_2_c = "#E0FFFF"
                                             podium_3_c = "#CD7F32"
-                                            
+
                                             if is_gf:
                                                 w1 = f"bold; color: {podium_1_c};" if s1 > s2 else f"bold; color: {podium_2_c};"
                                                 w2 = f"bold; color: {podium_1_c};" if s2 > s1 else f"bold; color: {podium_2_c};"
@@ -3474,18 +2969,19 @@ elif page == "🏟️ Grand Tournoi":
                                         else:
                                             w1 = w2 = "normal; color: white;"
                                             c1_score = c2_score = "transparent"
-                                            if p1 == "..." and p2 == "...": s1 = s2 = ""
-                                            
+                                            if p1 == "..." and p2 == "...":
+                                                s1 = s2 = ""
+
                                         c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w1}; margin-bottom: 5px;'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p1}</span><span style='color: {c1_score}; font-weight: bold;'>{s1}</span></div>"
                                         c_html += f"<div style='display: flex; justify-content: space-between; font-weight: {w2};'><span style='overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;'>{p2}</span><span style='color: {c2_score}; font-weight: bold;'>{s2}</span></div>"
                                     else:
                                         c_html += "<div style='display: flex; justify-content: space-between; color: #888; margin-bottom: 5px;'><span>...</span></div><div style='display: flex; justify-content: space-between; color: #888;'><span>...</span></div>"
-                                    
+
                                     c_html += "</div>"
                                     return c_html
 
                                 html = f"<h5 style='color: white; margin-top: 10px;'>{title}</h5>"
-                                
+
                                 if is_double_elim or prefix == "LB":
                                     has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches)
                                     if prefix == "WB":
@@ -3496,25 +2992,28 @@ elif page == "🏟️ Grand Tournoi":
                                     html += f"<div style='display: flex; flex-direction: row; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: {'600px' if prefix == 'WB' else '400px'}; zoom: 0.8;'>"
                                     for r_num in range(1, num_rounds + 1):
                                         html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 180px; margin-right: 20px;'>"
-                                        if prefix == "WB" and r_num == total_rounds_wb + 1: col_title = "👑 Finale"
-                                        elif prefix == "WB" and r_num == total_rounds_wb + 2: col_title = "⚔️ Reset"
-                                        else: col_title = f"Tour {r_num}"
+                                        if prefix == "WB" and r_num == total_rounds_wb + 1:
+                                            col_title = "👑 Finale"
+                                        elif prefix == "WB" and r_num == total_rounds_wb + 2:
+                                            col_title = "⚔️ Reset"
+                                        else:
+                                            col_title = f"Tour {r_num}"
                                         html += f"<div style='text-align: center; color: #ccc; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>{col_title}</div>"
-                                        
+
                                         if prefix == "WB":
                                             virtual_round = min(r_num, total_rounds_wb)
                                             expected_count = max(1, nb_matches_r1 // (2**(virtual_round-1)))
                                         else:
                                             virtual_round = math.ceil(r_num / 2)
                                             expected_count = max(1, nb_matches_r1 // (2**virtual_round))
-                                            
+
                                         html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                         for m_num in range(1, expected_count + 1):
                                             is_gf = (prefix == "WB" and r_num > total_rounds_wb)
                                             html += get_match_card_admin(r_num, m_num, is_gf)
                                         html += "</div></div>"
                                     html += "</div>"
-                                    
+
                                 else:
                                     html += "<div style='display: flex; justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 20px; min-height: 400px; zoom: 0.8;'>"
                                     html += "<div style='display: flex; flex-direction: row;'>"
@@ -3528,13 +3027,13 @@ elif page == "🏟️ Grand Tournoi":
                                             html += get_match_card_admin(r_num, m_num)
                                         html += "</div></div>"
                                     html += "</div>"
-                                    
+
                                     html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 200px; margin: 0 10px;'>"
                                     html += "<div style='text-align: center; color: gold; font-weight: bold; margin-bottom: 10px; flex: 0 0 auto;'>👑 Finale</div>"
                                     html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 1 1 auto;'>"
                                     html += get_match_card_admin(total_rounds_wb, 1, is_gf=True)
                                     html += "</div></div>"
-                                    
+
                                     html += "<div style='display: flex; flex-direction: row-reverse;'>"
                                     for r_num in range(1, total_rounds_wb):
                                         html += "<div style='display: flex; flex-direction: column; justify-content: space-around; flex: 0 0 180px; margin-left: 20px;'>"
@@ -3547,7 +3046,7 @@ elif page == "🏟️ Grand Tournoi":
                                         html += "</div></div>"
                                     html += "</div>"
                                     html += "</div>"
-                                
+
                                 return html
 
                             st.markdown(render_css_bracket_admin("WB", "🏆 Arbre du Tournoi"), unsafe_allow_html=True)
@@ -3562,20 +3061,20 @@ elif page == "🏟️ Grand Tournoi":
                             bg_color = "background: rgba(255, 215, 0, 0.1);" if is_gf else ""
                             with col.container(border=True):
                                 st.markdown(f"<div style='text-align:center; font-size:10px; opacity:0.5; {bg_color}'>Match {m_num}</div>", unsafe_allow_html=True)
-                                
+
                                 if m:
                                     p1_name = all_users.get(m.get("player1_id"), "En attente...") if m.get("player1_id") else "En attente..."
                                     p2_name = all_users.get(m.get("player2_id"), "En attente...") if m.get("player2_id") else "En attente..."
                                     is_done = m["status"] == "completed"
-                                    
+
                                     st.write(f"**{p1_name}**")
                                     st.write(f"**{p2_name}**")
-                                    
+
                                     if p1_name != "En attente..." and p2_name != "En attente...":
                                         sc1, sc2 = st.columns(2)
                                         s1 = sc1.number_input("S1", min_value=0, max_value=9, value=m["score1"], key=f"b_s1_{m['id']}", label_visibility="collapsed")
                                         s2 = sc2.number_input("S2", min_value=0, max_value=9, value=m["score2"], key=f"b_s2_{m['id']}", label_visibility="collapsed")
-                                        
+
                                         btn_lbl = "MAJ" if is_done else "Valider"
                                         if st.button(btn_lbl, key=f"b_btn_{m['id']}", use_container_width=True):
                                             if s1 == s2:
@@ -3602,7 +3101,7 @@ elif page == "🏟️ Grand Tournoi":
                                 for m_num in range(1, expected_count + 1):
                                     m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
                                     draw_interactive_match(col, m, r_num, m_num)
-                            
+
                             # 2. LOSER BRACKET
                             st.divider()
                             st.markdown("#### 💀 Loser Bracket (Repêchages)")
@@ -3617,7 +3116,7 @@ elif page == "🏟️ Grand Tournoi":
                                 for m_num in range(1, expected_count + 1):
                                     m = tier_dict_lb.get(f"LB_R{r_num}_M{m_num}")
                                     draw_interactive_match(col, m, r_num, m_num)
-                                    
+
                             # 3. GRANDE FINALE
                             st.divider()
                             has_reset = any(m["bracket_match_id"] == f"WB_R{total_rounds_wb + 2}_M1" for m in matches)
@@ -3635,19 +3134,19 @@ elif page == "🏟️ Grand Tournoi":
                         else:
                             # SINGLE ELIMINATION (Saisie Verticale Propre)
                             st.markdown("#### ✏️ Saisie des scores de l'Arbre")
-                            
+
                             # On boucle sur chaque tour, de gauche à droite
                             for r_num in range(1, total_rounds_wb + 1):
                                 is_finale = (r_num == total_rounds_wb)
-                                
+
                                 if not is_finale:
                                     st.markdown(f"##### Tour {r_num}")
                                     expected_count = max(1, nb_matches_r1 // (2**(r_num-1)))
-                                    
+
                                     # On crée des rangées de 3 colonnes max pour que ça reste toujours large et lisible
                                     cols_per_row = min(3, expected_count) if expected_count > 1 else 1
                                     cols = st.columns(cols_per_row)
-                                    
+
                                     for m_num in range(1, expected_count + 1):
                                         col = cols[(m_num - 1) % cols_per_row]
                                         m = tier_dict_wb.get(f"WB_R{r_num}_M{m_num}")
